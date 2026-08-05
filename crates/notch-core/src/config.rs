@@ -28,6 +28,12 @@ pub struct NotchConfig {
     pub sessions: bool,
     /// A to-do briefing. Needs a producer writing to `todos.json`.
     pub todos: bool,
+    /// Hold the panel open, ignoring the cursor leaving.
+    ///
+    /// Persisted rather than kept in memory so a terminal can set it: without a
+    /// local server there is no other way to reach the running app, and "leave it
+    /// open" is a reasonable thing to want to stay set.
+    pub pinned: bool,
     /// How long the cursor must rest in the sliver before the panel opens, in
     /// milliseconds. Without this, merely crossing the notch on the way
     /// somewhere else pops the HUD open.
@@ -62,6 +68,7 @@ impl Default for NotchConfig {
             git: false,
             sessions: false,
             todos: false,
+            pinned: false,
             open_delay_ms: DEFAULT_OPEN_DELAY_MS,
         }
     }
@@ -103,6 +110,7 @@ impl NotchConfig {
             "git" => Ok(self.git),
             "sessions" => Ok(self.sessions),
             "todos" => Ok(self.todos),
+            "pinned" => Ok(self.pinned),
             other => anyhow::bail!("unknown notch module: {other}"),
         }
     }
@@ -117,6 +125,7 @@ impl NotchConfig {
             "git" => next.git = on,
             "sessions" => next.sessions = on,
             "todos" => next.todos = on,
+            "pinned" => next.pinned = on,
             other => anyhow::bail!("unknown notch module: {other}"),
         }
         Ok(next)
@@ -234,6 +243,7 @@ mod tests {
             git: false,
             sessions: true,
             todos: false,
+            pinned: true,
             open_delay_ms: 120,
         };
         let json = serde_json::to_string(&cfg).unwrap();

@@ -56,7 +56,11 @@ fn main() {
 /// Brings the panel in line with its settings file. Window work has to happen on
 /// the main thread; this runs on the reconcile thread.
 fn reconcile(app: &AppHandle) {
-    let want = config::load().enabled;
+    let cfg = config::load();
+    // Pick up `notch pin` from a terminal; a click has already agreed with this.
+    hud::sync_pin(&cfg);
+
+    let want = cfg.enabled;
     if want == notch::visible(app) {
         return;
     }

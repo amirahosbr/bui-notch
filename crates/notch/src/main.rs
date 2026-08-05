@@ -45,6 +45,12 @@ enum Action {
         #[arg(default_value = "toggle")]
         state: String,
     },
+    /// Hold the panel open, or let it close on the cursor again.
+    Pin {
+        /// on | off | toggle (default: toggle).
+        #[arg(default_value = "toggle")]
+        state: String,
+    },
     /// Check that everything the HUD depends on is actually wired up.
     ///
     /// Start here when the panel is showing less than you expected: each module
@@ -73,8 +79,23 @@ fn run(action: Option<&Action>, cfg: &NotchConfig) -> Result<()> {
         Some(Action::Toggle) => set(cfg, "enabled", !cfg.enabled),
         Some(Action::Delay { ms }) => set_delay(cfg, *ms),
         Some(Action::Module { name, state }) => set_module(cfg, name, state),
+        Some(Action::Pin { state }) => set_pin(cfg, state),
         Some(Action::Doctor { json }) => run_doctor(*json),
     }
+}
+
+/// Holds the panel open, or lets it close again. A running app adopts this on its
+/// next reconcile tick, so it lands within a few seconds.
+fn set_pin(cfg: &NotchConfig, state: &str) -> Result<()> {
+    let want = match state.to_ascii_lowercase().as_str() {
+        "on" => true,
+        "off" => false,
+        "toggle" => !cfg.pinned,
+        other => anyhow::bail!("expected on, off, or toggle — got '{other}'"),
+    };
+    config::save(&cfg.with("pinned", want)?)?;
+    println!("panel {}", if want { "pinned open" } else { "unpinned" });
+    Ok(())
 }
 
 /// Prints every check, and exits non-zero on a real failure so a script can gate
@@ -169,9 +190,10 @@ fn print_status(cfg: &NotchConfig) {
     println!("notch on | off | toggle");
     println!("notch delay <ms>");
     println!("notch module <name> [on|off|toggle]");
+    println!("notch pin [on|off|toggle]");
     println!("notch doctor");
     println!();
-    println!("Click the sliver to pin the panel open.");
+    println!("Click the sliver to pin the panel open, or use `notch pin`.");
 }
 
 fn describe_delay(ms: u64) -> String {
@@ -253,6 +275,8 @@ mod tests {
             vec!["notch", "delay", "600"],
             vec!["notch", "module", "day"],
             vec!["notch", "module", "day", "off"],
+            vec!["notch", "pin"],
+            vec!["notch", "pin", "on"],
             vec!["notch", "doctor"],
             vec!["notch", "doctor", "--json"],
         ] {

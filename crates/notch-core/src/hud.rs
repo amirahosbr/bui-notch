@@ -12,8 +12,11 @@ use serde_json::{json, Value};
 
 use crate::{config, day, git, sessions, todos, usage};
 
-/// Pinned open until something says otherwise — a click on the sliver. Lives here
-/// rather than in the app so the payload and the panel read one flag.
+/// The live pin, mirroring `config.pinned`.
+///
+/// The hover watcher asks up to eleven times a second, which is far too often to
+/// read a file, so the flag is cached here. [`config`] stays the source of truth:
+/// every setter writes it, and [`sync_pin`] adopts a change made by a terminal.
 static PINNED: AtomicBool = AtomicBool::new(false);
 
 /// Whether the panel is pinned open.
@@ -21,15 +24,27 @@ pub fn pinned() -> bool {
     PINNED.load(Ordering::Relaxed)
 }
 
-/// Sets the pin, returning the new state.
+/// Sets the pin and persists it, returning the new state.
+///
+/// A failed write still moves the live flag: the click the user just made should
+/// take effect even if the settings file is unwritable.
 pub fn set_pinned(on: bool) -> bool {
     PINNED.store(on, Ordering::Relaxed);
+    let _ = config::save(&config::load().with("pinned", on).unwrap_or_default());
     on
 }
 
 /// Flips the pin, returning the new state.
 pub fn toggle_pinned() -> bool {
     set_pinned(!pinned())
+}
+
+/// Adopts `config.pinned` into the live flag, so `notch pin` from a terminal lands.
+///
+/// Called on the app's reconcile tick. After a click the two already agree, so
+/// this is a no-op and the click cannot be undone by it.
+pub fn sync_pin(cfg: &config::NotchConfig) {
+    PINNED.store(cfg.pinned, Ordering::Relaxed);
 }
 
 /// Every module's reading, with the disabled ones absent.
