@@ -947,6 +947,14 @@
             <!-- The clock lives in the Day card, not here: macOS already puts one
                  in the menu bar a few hundred points to the right. -->
             <span class="strip__pin" id="pill-pin" hidden title="Pinned open"></span>
+            <!-- This whole slot is the Claude session: how long until it resets,
+                 how much is gone, and that as a meter. Grouped so the countdown
+                 reads as that limit's reset rather than as a loose duration. -->
+            <span
+              class="strip__stat"
+              id="pill-resets"
+              title="Until the Claude session resets"
+            ></span>
             <span class="strip__stat strip__stat--strong" id="pill-session"></span>
             <span class="micro" id="pill-day">
               <i class="micro__seg"></i>
@@ -955,19 +963,13 @@
             </span>
           </div>
           <div class="strip__gap"></div>
+          <!-- The other side is work rather than usage: what's due, what's been
+               pushed, and what's running. -->
           <div class="strip__slot strip__slot--right">
             <span class="strip__stat" id="pill-todos"></span>
             <span class="strip__stat" id="pill-commits"></span>
             <span class="dot" id="pill-dot" hidden></span>
             <span class="strip__stat" id="pill-agents"></span>
-            <!-- When the session limit resets. The battery used to sit here, but
-                 macOS already shows one — this is a number it has no equivalent
-                 for, and it pairs with the session % on the other side. -->
-            <span
-              class="strip__stat"
-              id="pill-resets"
-              title="Until the Claude session resets"
-            ></span>
           </div>
         </div>
       </div>

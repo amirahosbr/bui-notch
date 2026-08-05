@@ -181,6 +181,12 @@ function heatCell(block, day) {
 // --- collapsed strip ------------------------------------------------------
 
 function renderPill(p) {
+  // Left slot, in order: how long until the session resets, how much of it is
+  // gone, and the same as a meter. No battery and no clock anywhere in the strip —
+  // macOS draws both, and a second bare percentage could not be told apart from
+  // the session's.
+  setText("pill-resets", p.resets_in ? `↻ ${p.resets_in}` : "");
+
   // A percentage in the strip always means Claude session usage. Day progress gets
   // the meter but no number, so the two can never be read as each other.
   setText("pill-session", p.session_pct == null ? "" : `${round(p.session_pct)}%`);
@@ -202,11 +208,6 @@ function renderPill(p) {
   el("pill-dot").hidden = !agents;
   el("pill-dot").className = `dot${agents ? " dot--live" : ""}`;
   setText("pill-agents", agents ? String(agents) : "");
-
-  // "↻ 3h18m" — how long until the session limit resets. No battery here: macOS
-  // shows one already, and a bare "100%" beside a bare "22%" invites exactly the
-  // question of which is which.
-  setText("pill-resets", p.resets_in ? `↻ ${p.resets_in}` : "");
 }
 
 // --- overview: usage card -------------------------------------------------
