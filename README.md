@@ -45,14 +45,42 @@ Starts it at login and brings it back if it crashes. Logs go to
 
 ## Use it
 
-Hover the notch to open the panel. Two tabs:
+Hover the notch to open the panel. Five tabs:
 
-* **Overview** — the clock, today's date, how much of the day is gone, the
-  battery, and how far into the week you are.
-* **Day** — the same readings written out as a list.
+* **Overview** — Claude usage, the clock/date/day progress/battery, a
+  contributions strip, and the newest few coding sessions.
+* **To-do** — today, this week, in progress, done.
+* **Usage** — session and weekly limits in detail, plus one row per reset window.
+* **Sessions** — every live Claude Code session.
+* **Git** — the full 90-day contribution grid, totals, and recent pushes.
 
 Rest the cursor on a tab pill to switch to it (or click it). Click the sliver to
-pin the panel open so it stops following your cursor; click again to release it.
+pin the panel open so it stops following your cursor; click again to release it,
+or use `notch pin`.
+
+Only the clock/battery module is on out of the box — everything else needs
+something you may not have, so it ships off. Turn on what you want:
+
+```bash
+notch module usage on      # needs a Claude Code OAuth token
+notch module git on        # needs `gh`, authenticated
+notch module sessions on   # needs ~/.claude/projects
+notch module todos on      # needs a producer writing todos.json
+```
+
+## Is it working?
+
+```bash
+notch --version
+notch doctor         # every integration, and what to run about each one
+notch doctor --json  # same, for scripts (exits 1 on a real failure)
+```
+
+Most of what the modules need lives outside this app — a running panel, the
+LaunchAgent, a token, `gh` on a PATH launchd doesn't provide, a producer writing a
+file. Each fails quietly and separately, so a blank card looks the same whichever
+one it was. `doctor` asks all of them at once, skips the checks belonging to
+switched-off modules, and names the command that fixes each failure.
 
 ## Configure it
 
@@ -67,6 +95,9 @@ notch delay 600             # or make it wait 600ms (the default)
 
 notch module day off        # turn a module off
 notch module day on
+
+notch pin on                # hold the panel open
+notch pin off
 ```
 
 Settings live in `~/Library/Application Support/bui-notch/notch.json`. A running
@@ -78,10 +109,13 @@ Three crates:
 
 ```
 crates/
-  notch-core/   settings, the day module, and the JSON payload the panel renders
+  notch-core/   settings, the modules, and the JSON payload the panel renders
   notch/        the `notch` CLI, which only ever writes the settings file
   notch-app/    the panel itself (Tauri v2) — window mechanics + the web UI
 ```
+
+Each module is a `payload()` returning `available: false` with a reason rather than
+failing the whole document, so one broken integration costs one card.
 
 Two macOS details make it behave like a notch app rather than a floating window:
 the window level is raised to `NSStatusWindowLevel` so it draws over the menu bar
