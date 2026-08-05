@@ -130,7 +130,9 @@ fn question_from(input: &Value) -> Option<Pending> {
 /// which beats a URL.
 fn detail_from(input: &Value) -> Option<String> {
     for key in ["command", "file_path", "path", "url", "pattern"] {
-        let Some(v) = input[key].as_str() else { continue };
+        let Some(v) = input[key].as_str() else {
+            continue;
+        };
         let flat = v.split_whitespace().collect::<Vec<_>>().join(" ");
         if flat.is_empty() {
             continue;

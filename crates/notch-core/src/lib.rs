@@ -6,6 +6,10 @@
 //!   - [`hud`]      the single JSON payload the panel renders, and the pin flag
 //!   - [`doctor`]   whether the things the modules depend on are actually wired up
 //!
+//! Plus the one signal that is not a module, because it arrives unasked:
+//!   - [`attention`] "an agent needs you", posted by a Claude Code hook
+//!   - [`prompt`]    what that agent is asking, read from its transcript
+//!
 //! One module per card, each answering with `available: false` and a reason rather
 //! than failing the payload:
 //!   - [`day`]      clock, date, day/week progress, battery
@@ -14,6 +18,7 @@
 //!   - [`sessions`] live Claude Code sessions
 //!   - [`todos`]    a to-do briefing written by something else
 
+pub mod attention;
 pub mod config;
 pub mod day;
 pub mod doctor;
@@ -22,6 +27,7 @@ pub mod git;
 pub mod history;
 pub mod hud;
 pub mod live;
+pub mod prompt;
 pub mod sessions;
 pub mod todos;
 pub mod token;
