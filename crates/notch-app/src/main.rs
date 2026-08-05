@@ -44,6 +44,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             notch_payload,
+            notch_windows,
             notch_metrics,
             notch_pin,
             notch_toggle,
@@ -94,6 +95,17 @@ async fn notch_payload() -> Result<serde_json::Value, String> {
         );
     }
     Ok(payload)
+}
+
+/// The reset windows the Usage tab lists.
+///
+/// Separate from [`notch_payload`] because it reads a growing log: the panel asks
+/// only while that tab is actually open.
+#[tauri::command]
+async fn notch_windows() -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(notch_core::usage::windows)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Screen geometry the panel needs to lay itself out around the physical notch,

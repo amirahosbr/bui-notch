@@ -18,8 +18,16 @@ use serde::{Deserialize, Serialize};
 pub struct NotchConfig {
     /// Whether the panel is shown at all. Off hides it without quitting the app.
     pub enabled: bool,
-    /// Clock, date, day and week progress, battery.
+    /// Clock, date, day and week progress, battery. Needs nothing external.
     pub day: bool,
+    /// Claude session and weekly limits. Needs an OAuth token.
+    pub usage: bool,
+    /// GitHub contributions. Needs the `gh` CLI, authenticated.
+    pub git: bool,
+    /// Live Claude Code sessions. Needs `~/.claude/projects`.
+    pub sessions: bool,
+    /// A to-do briefing. Needs a producer writing to `todos.json`.
+    pub todos: bool,
     /// How long the cursor must rest in the sliver before the panel opens, in
     /// milliseconds. Without this, merely crossing the notch on the way
     /// somewhere else pops the HUD open.
@@ -33,13 +41,27 @@ pub const DEFAULT_OPEN_DELAY_MS: u64 = 600;
 pub const MAX_OPEN_DELAY_MS: u64 = 5_000;
 
 /// Every module a user can name, in the order the HUD lays them out.
-pub const MODULES: [(&str, &str); 1] = [("day", "Clock, date, day progress, battery")];
+pub const MODULES: [(&str, &str); 5] = [
+    ("day", "Clock, date, day progress, battery"),
+    ("usage", "Claude session + weekly limits"),
+    ("git", "GitHub contributions"),
+    ("sessions", "Live Claude Code sessions"),
+    ("todos", "To-do briefing"),
+];
 
 impl Default for NotchConfig {
+    /// Only `day` is on: it is the one module that needs nothing outside itself.
+    /// The rest each assume a token, a CLI, or a producer that a fresh install
+    /// won't have, and a card reading "unavailable" on first run looks broken
+    /// rather than optional. `notch module <name> on` turns them on.
     fn default() -> Self {
         Self {
             enabled: true,
             day: true,
+            usage: false,
+            git: false,
+            sessions: false,
+            todos: false,
             open_delay_ms: DEFAULT_OPEN_DELAY_MS,
         }
     }
@@ -77,23 +99,27 @@ impl NotchConfig {
         match key {
             "enabled" => Ok(self.enabled),
             "day" => Ok(self.day),
+            "usage" => Ok(self.usage),
+            "git" => Ok(self.git),
+            "sessions" => Ok(self.sessions),
+            "todos" => Ok(self.todos),
             other => anyhow::bail!("unknown notch module: {other}"),
         }
     }
 
     /// The same settings with one switch set. The original is untouched.
     pub fn with(&self, key: &str, on: bool) -> Result<Self> {
+        let mut next = self.clone();
         match key {
-            "enabled" => Ok(Self {
-                enabled: on,
-                ..self.clone()
-            }),
-            "day" => Ok(Self {
-                day: on,
-                ..self.clone()
-            }),
+            "enabled" => next.enabled = on,
+            "day" => next.day = on,
+            "usage" => next.usage = on,
+            "git" => next.git = on,
+            "sessions" => next.sessions = on,
+            "todos" => next.todos = on,
             other => anyhow::bail!("unknown notch module: {other}"),
         }
+        Ok(next)
     }
 
     /// The same settings with one switch flipped.
@@ -115,11 +141,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_show_the_panel_and_every_module() {
+    fn defaults_show_the_panel_with_only_the_self_contained_module() {
         let cfg = NotchConfig::default();
         assert!(cfg.enabled);
-        assert!(cfg.day);
+        assert!(cfg.day, "the one module needing nothing external");
         assert_eq!(cfg.open_delay_ms, DEFAULT_OPEN_DELAY_MS);
+    }
+
+    #[test]
+    fn every_module_needing_setup_is_off_by_default() {
+        // A fresh install must not show cards that read "unavailable".
+        let cfg = NotchConfig::default();
+        for key in ["usage", "git", "sessions", "todos"] {
+            assert!(!cfg.get(key).unwrap(), "{key} should ship off");
+        }
+    }
+
+    #[test]
+    fn each_module_switches_independently() {
+        let cfg = NotchConfig::default().with("git", true).unwrap();
+        assert!(cfg.git);
+        assert!(!cfg.usage, "turning one on leaves the others alone");
+        assert!(!cfg.sessions);
+        assert!(!cfg.todos);
+        assert!(cfg.day, "and does not disturb day");
+        assert!(cfg.enabled);
     }
 
     #[test]
@@ -184,6 +230,10 @@ mod tests {
         let cfg = NotchConfig {
             enabled: false,
             day: true,
+            usage: true,
+            git: false,
+            sessions: true,
+            todos: false,
             open_delay_ms: 120,
         };
         let json = serde_json::to_string(&cfg).unwrap();

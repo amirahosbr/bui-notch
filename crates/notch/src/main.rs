@@ -7,6 +7,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use notch_core::config::{self, NotchConfig, MAX_OPEN_DELAY_MS, MODULES};
+use notch_core::doctor::{self, State};
 
 #[derive(Parser)]
 #[command(
@@ -44,6 +45,15 @@ enum Action {
         #[arg(default_value = "toggle")]
         state: String,
     },
+    /// Check that everything the HUD depends on is actually wired up.
+    ///
+    /// Start here when the panel is showing less than you expected: each module
+    /// needs something outside this app, and they fail quietly and separately.
+    Doctor {
+        /// Print JSON instead, and exit non-zero on a real failure.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -63,6 +73,44 @@ fn run(action: Option<&Action>, cfg: &NotchConfig) -> Result<()> {
         Some(Action::Toggle) => set(cfg, "enabled", !cfg.enabled),
         Some(Action::Delay { ms }) => set_delay(cfg, *ms),
         Some(Action::Module { name, state }) => set_module(cfg, name, state),
+        Some(Action::Doctor { json }) => run_doctor(*json),
+    }
+}
+
+/// Prints every check, and exits non-zero on a real failure so a script can gate
+/// on it.
+fn run_doctor(as_json: bool) -> Result<()> {
+    let checks = doctor::run();
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&checks)?);
+    } else {
+        for c in &checks {
+            let mark = match c.state {
+                State::Ok => "✓",
+                State::Fail => "✗",
+                State::Skipped => "–",
+            };
+            println!("{mark} {:<9} {:<26} {}", c.module, c.name, c.detail);
+            if let Some(fix) = &c.fix {
+                println!("               → {fix}");
+            }
+        }
+        println!();
+        println!(
+            "{}",
+            if doctor::healthy(&checks) {
+                "everything the switched-on modules need is wired up."
+            } else {
+                "something a switched-on module needs is missing — see the arrows above."
+            }
+        );
+    }
+
+    if doctor::healthy(&checks) {
+        Ok(())
+    } else {
+        std::process::exit(1);
     }
 }
 
@@ -121,6 +169,7 @@ fn print_status(cfg: &NotchConfig) {
     println!("notch on | off | toggle");
     println!("notch delay <ms>");
     println!("notch module <name> [on|off|toggle]");
+    println!("notch doctor");
     println!();
     println!("Click the sliver to pin the panel open.");
 }
@@ -204,6 +253,8 @@ mod tests {
             vec!["notch", "delay", "600"],
             vec!["notch", "module", "day"],
             vec!["notch", "module", "day", "off"],
+            vec!["notch", "doctor"],
+            vec!["notch", "doctor", "--json"],
         ] {
             assert!(
                 Cli::try_parse_from(&args).is_ok(),
