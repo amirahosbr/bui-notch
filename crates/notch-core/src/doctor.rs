@@ -8,6 +8,7 @@
 //! A check reports on the module it belongs to, and a module that is switched off
 //! is reported as skipped rather than failing.
 
+use std::fs;
 use std::process::Command;
 
 use serde::Serialize;
@@ -109,12 +110,17 @@ fn app_running() -> Check {
     )
 }
 
-fn launch_agent() -> Check {
-    let plist = dirs::home_dir().map(|h| {
+/// The LaunchAgent's plist, whether or not it exists.
+fn agent_plist() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| {
         h.join("Library")
             .join("LaunchAgents")
             .join("com.osbr.bui-notch.plist")
-    });
+    })
+}
+
+fn launch_agent() -> Check {
+    let plist = agent_plist();
     let installed = plist.as_ref().is_some_and(|p| p.exists());
     check(
         "panel",
@@ -161,25 +167,64 @@ fn usage_token(on: bool) -> Check {
     )
 }
 
+/// Directories launchd already puts on `PATH`, so a tool in one of them needs no
+/// help from the plist.
+const LAUNCHD_DEFAULT_PATH: [&str; 4] = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+
+/// The directory `gh` actually lives in.
+fn gh_dir() -> Option<String> {
+    let out = Command::new("sh")
+        .args(["-c", "command -v gh"])
+        .output()
+        .ok()?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let dir = std::path::Path::new(&path).parent()?;
+    Some(dir.to_string_lossy().into_owned())
+}
+
+/// Whether the panel's own environment can see `gh`, which is a different question
+/// from whether your shell can.
+///
+/// This check exists because it got the answer wrong once: `gh` was installed and
+/// authenticated, this reported it fine, and the git module still said "gh
+/// unavailable" — launchd hands its jobs a bare `PATH` with no Homebrew in it, so
+/// the panel could not find a binary the shell found instantly. A check that passes
+/// while the thing is broken is worse than no check.
+///
+/// `Some(dir)` means `gh` is in `dir` and the LaunchAgent cannot reach it.
+fn gh_hidden_from_agent() -> Option<String> {
+    let dir = gh_dir()?;
+    if LAUNCHD_DEFAULT_PATH.contains(&dir.as_str()) {
+        return None;
+    }
+    // No LaunchAgent means the panel is started from a shell, which has the same
+    // PATH you just checked with.
+    let plist = fs::read_to_string(agent_plist()?).ok()?;
+    (!plist.contains(&dir)).then_some(dir)
+}
+
 fn gh_cli(on: bool) -> Check {
     let ok = Command::new("gh")
         .args(["auth", "status"])
         .output()
         .is_ok_and(|o| o.status.success());
-    gated(
-        on,
-        "git",
-        "gh CLI",
-        if ok {
-            (true, "gh is installed and authenticated".into(), None)
-        } else {
-            (
-                false,
-                "gh is missing, or not authenticated".into(),
-                Some("brew install gh && gh auth login"),
-            )
-        },
-    )
+
+    let result = if !ok {
+        (
+            false,
+            "gh is missing, or not authenticated".into(),
+            Some("brew install gh && gh auth login"),
+        )
+    } else if let Some(dir) = gh_hidden_from_agent() {
+        (
+            false,
+            format!("gh works here, but the LaunchAgent's PATH cannot reach {dir}"),
+            Some("./scripts/install-launchagent.sh"),
+        )
+    } else {
+        (true, "gh is installed and reachable".into(), None)
+    };
+    gated(on, "git", "gh CLI", result)
 }
 
 fn transcripts(on: bool) -> Check {
@@ -305,6 +350,35 @@ mod tests {
             assert!(
                 checks.iter().any(|c| c.module == module),
                 "nothing checked for {module}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tool_in_a_default_launchd_dir_needs_no_plist_help() {
+        // The bug this guards was specifically Homebrew's prefix; something in
+        // /usr/bin is on launchd's PATH already and must not be flagged.
+        for dir in LAUNCHD_DEFAULT_PATH {
+            assert!(
+                LAUNCHD_DEFAULT_PATH.contains(&dir),
+                "{dir} should count as already reachable"
+            );
+        }
+    }
+
+    #[test]
+    fn the_gh_check_agrees_with_what_the_panel_can_see() {
+        // Whatever this machine looks like, a pass must mean the panel can reach
+        // gh — not merely that this shell can.
+        let c = gated(true, "git", "gh CLI", (true, "x".into(), None));
+        assert_eq!(c.state, State::Ok);
+
+        let real = gh_cli(true);
+        if real.state == State::Ok {
+            assert!(
+                gh_hidden_from_agent().is_none(),
+                "reported OK while the LaunchAgent cannot reach gh — the exact false \
+                 pass this check exists to stop"
             );
         }
     }

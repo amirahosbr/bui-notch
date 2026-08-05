@@ -34,6 +34,17 @@ if [[ -z "$BIN" ]]; then
   exit 1
 fi
 
+# launchd hands processes a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin) with no
+# Homebrew in it. The git module shells out to `gh`, which Homebrew installs to
+# /opt/homebrew/bin — so without pinning this, that one module reports "gh
+# unavailable" while everything else looks fine, and `gh` works perfectly when you
+# check it by hand in a shell that does have Homebrew on PATH.
+BREW_BIN=""
+if command -v brew >/dev/null 2>&1; then
+  BREW_BIN="$(brew --prefix)/bin:"
+fi
+AGENT_PATH="${BREW_BIN}/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
 mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
 
 cat > "$PLIST" <<PLIST_EOF
@@ -58,6 +69,13 @@ cat > "$PLIST" <<PLIST_EOF
   <dict>
     <key>SuccessfulExit</key>
     <false/>
+  </dict>
+
+  <!-- Without this the git module cannot find gh; see the comment above. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$AGENT_PATH</string>
   </dict>
 
   <!-- It draws a UI, so it should not be throttled like a batch job. -->
