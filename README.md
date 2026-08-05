@@ -32,6 +32,8 @@ cargo install --path crates/notch-app   # the panel
 cargo install --path crates/notch       # the CLI that configures it
 ```
 
+
+
 ### Check it installed
 
 ```bash
@@ -75,41 +77,61 @@ Click the sliver to pin the panel open, or use `notch pin`.
 
 On a fresh install only `day` is on — see [Use it](#use-it) for turning the rest on.
 
-### Start the panel
+### Start it
 
-```bash
-notch-app
-```
-
-The panel appears immediately. There is no dock icon and no menu-bar icon — the
-panel is the whole interface.
-
-It stays in the foreground of that terminal, so `Ctrl-C` stops it. To have it always
-running instead, install the LaunchAgent below rather than starting it by hand.
-
-> `notch-app` takes no arguments. It is the panel, not a CLI — `notch-app --version`
-> will just launch it. Use `notch --version` for the version, and `notch` for
-> everything else.
-
-### Keep it running
+Install the LaunchAgent — this is the normal way to run it:
 
 ```bash
 ./scripts/install-launchagent.sh
 ```
 
-Starts it at login and brings it back if it crashes. Logs go to
-`~/Library/Logs/notch-app.log`. Remove it with `--uninstall`.
+That starts the panel now, again at every login, and brings it back if it crashes.
+Logs go to `~/Library/Logs/notch-app.log`; remove it with `--uninstall`.
+
+The panel appears immediately. There is no dock icon and no menu-bar icon — the
+panel is the whole interface.
+
+You can run `notch-app` directly instead, which holds that terminal until `Ctrl-C`.
+That's handy while hacking on it; for daily use the LaunchAgent is the one you want.
+
+### `notch-app` and `notch` are two different things
+
+This is the part that trips people up:
+
+| | |
+| --- | --- |
+| **`notch-app`** | The **process**. Something has to be running or there is nothing to draw. Once the LaunchAgent is installed, **you never run this again.** |
+| **`notch`** | The **CLI**. It writes settings that the running process reads. This is what you use day to day. |
+
+So showing and hiding the panel is the CLI's job, not the app's:
+
+```bash
+notch off      # hide it — the process keeps running
+notch on       # show it again
+notch toggle
+```
+
+A change lands within about five seconds. Nothing needs restarting, and there is
+never any need to start `notch-app` again to make a setting take effect.
+
+Two consequences worth knowing:
+
+* **Running `notch-app` while one is already running gives you two panels**, stacked
+  on the same notch. There is no single-instance guard yet. If it ever looks
+  doubled, `pgrep -x notch-app` should print exactly one line.
+* **`notch-app` takes no arguments.** Tauri ignores them, so `notch-app --version`
+  quietly launches the panel instead of printing a version. Use `notch --version`.
 
 ## Use it
 
 Hover the notch to open the panel. Five tabs:
 
-* **Overview** — Claude usage, the clock/date/day progress/battery, a
-  contributions strip, and the newest few coding sessions.
-* **To-do** — today, this week, in progress, done.
-* **Usage** — session and weekly limits in detail, plus one row per reset window.
-* **Sessions** — every live Claude Code session.
-* **Git** — the full 90-day contribution grid, totals, and recent pushes.
+- **Overview** — Claude usage, the clock/date/day progress/battery, a
+contributions strip, and the newest few coding sessions.
+- **To-do** — today, this week, in progress, done.
+- **Usage** — session and weekly limits in detail, plus one row per reset window.
+- **Sessions** — every live Claude Code session.
+- **Git** — the full 90-day contribution grid, totals, and recent pushes.
 
 Rest the cursor on a tab pill to switch to it (or click it). Click the sliver to
 pin the panel open so it stops following your cursor; click again to release it,
@@ -124,6 +146,8 @@ notch module git on        # needs `gh`, authenticated
 notch module sessions on   # needs ~/.claude/projects
 notch module todos on      # needs a producer writing todos.json
 ```
+
+
 
 ## Is it working?
 
@@ -162,13 +186,13 @@ every time a build took half a minute.
 
 Three properties it is built to have:
 
-* **It never takes focus.** The panel is never the key window, and opening it for an
-  interrupt does not change that, so whatever you were typing into keeps the
-  keyboard.
-* **It closes itself.** A panel that opens unprompted and then stays open is worse
-  than one that never opens.
-* **It has no off switch.** Every other module can be turned off; this cannot,
-  because an interrupt you have to remember to enable is not an interrupt.
+- **It never takes focus.** The panel is never the key window, and opening it for an
+interrupt does not change that, so whatever you were typing into keeps the
+keyboard.
+- **It closes itself.** A panel that opens unprompted and then stays open is worse
+than one that never opens.
+- **It has no off switch.** Every other module can be turned off; this cannot,
+because an interrupt you have to remember to enable is not an interrupt.
 
 The banner is read-only. bui could answer the agent by typing the chosen digit into
 its terminal pane; that needs tmux or zellij plumbing and a pane registry, and is
@@ -201,6 +225,8 @@ notch todos schema    # an example document to copy
 notch todos clear      # delete it
 ```
 
+
+
 ### It cannot be scheduled
 
 `/todo-brief` only works in a session that **actually has the connectors**. A
@@ -222,15 +248,17 @@ briefing announces itself rather than quietly passing as today's.
 Three of the five modules read nothing but your own computer. Two make network
 calls, and it's worth knowing which:
 
-| Module | Where its data comes from |
-| --- | --- |
-| `day` | The system clock, and `pmset` for the battery. Local. |
-| `sessions` | The transcript files in `~/.claude/projects`. Local. |
-| `todos` | A JSON file another process writes. Local — the HUD itself talks to neither Slack nor Gmail. |
-| `usage` | **A request to `api.anthropic.com`.** |
-| `git` | **`gh api` calls to GitHub.** |
 
-**`usage`** sends a throwaway 1-token request to `/v1/messages` and reads the
+| Module     | Where its data comes from                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------- |
+| `day`      | The system clock, and `pmset` for the battery. Local.                                        |
+| `sessions` | The transcript files in `~/.claude/projects`. Local.                                         |
+| `todos`    | A JSON file another process writes. Local — the HUD itself talks to neither Slack nor Gmail. |
+| `usage`    | **A request to** `api.anthropic.com`**.**                                                    |
+| `git`      | `gh api` **calls to GitHub.**                                                                |
+
+
+`usage` sends a throwaway 1-token request to `/v1/messages` and reads the
 rate-limit *response headers* — that is where the percentages and reset times come
 from, so they are Anthropic's numbers rather than a guess. Your token is only read
 locally (the macOS keychain, then `~/.claude/.credentials.json`) and is never
@@ -241,7 +269,7 @@ built from; nothing uploads it.
 Note that this probe **spends a little of the quota it is measuring**. It's cached
 for 60 seconds, so at most one request a minute while the module is on.
 
-**`git`** shells out to `gh`, which reads your contribution calendar, your recent
+`git` shells out to `gh`, which reads your contribution calendar, your recent
 events and your open PRs from GitHub. Nothing is read from your local repositories
 — the calendar is used precisely because it counts commits on branches that were
 never merged, which neither a local scan nor GitHub's commit search would show.
@@ -290,19 +318,21 @@ on all Spaces.
 
 Some less obvious choices, each of which took a while to arrive at:
 
-* **The window never resizes.** A window resize can't be animated — every step is
-  a discrete jump, and the webview relayouts on each one. So the window is fixed
-  at the open size and CSS animates the black shape inside it, on the GPU.
-* **Hover is sampled, not evented.** WebKit's tracking areas are scoped to the key
-  window, and this panel deliberately never takes focus, so `mouseenter` would
-  only fire after you clicked it. A worker thread samples the cursor through
-  CoreGraphics instead — fast near the top edge, slow elsewhere, because idle
-  wake-ups are what cost battery.
-* **Clicks pass through except on the sliver.** Collapsed, the window covers a
-  large transparent area; if it accepted clicks it would swallow menu-bar clicks.
-  So it ignores the cursor until the cursor is actually over the sliver.
-* **Opening waits for the cursor to settle.** Crossing the notch on the way to the
-  menu bar shouldn't pop the panel open — only stopping there should.
+- **The window never resizes.** A window resize can't be animated — every step is
+a discrete jump, and the webview relayouts on each one. So the window is fixed
+at the open size and CSS animates the black shape inside it, on the GPU.
+- **Hover is sampled, not evented.** WebKit's tracking areas are scoped to the key
+window, and this panel deliberately never takes focus, so `mouseenter` would
+only fire after you clicked it. A worker thread samples the cursor through
+CoreGraphics instead — fast near the top edge, slow elsewhere, because idle
+wake-ups are what cost battery.
+- **Clicks pass through except on the sliver.** Collapsed, the window covers a
+large transparent area; if it accepted clicks it would swallow menu-bar clicks.
+So it ignores the cursor until the cursor is actually over the sliver.
+- **Opening waits for the cursor to settle.** Crossing the notch on the way to the
+menu bar shouldn't pop the panel open — only stopping there should.
+
+
 
 ## Develop
 
