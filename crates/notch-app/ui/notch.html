@@ -157,16 +157,6 @@
         flex: 0 0 var(--notch-w);
       }
 
-      .strip__clock {
-        font-weight: 600;
-      }
-
-      .strip__meridiem {
-        font-size: var(--text-2xs);
-        color: var(--ink-muted);
-        margin-left: 0.1rem;
-      }
-
       .strip__stat {
         font-size: var(--text-sm);
         color: var(--ink-muted);
@@ -178,9 +168,18 @@
         font-size: var(--text-md);
       }
 
-      /* Pinned: the sliver reads as held rather than hovered. */
-      .panel--pinned .strip__clock {
-        color: var(--ok);
+      /* Pinned: a green clamp mark, so the sliver reads as held rather than
+         hovered. A bar rather than a dot, so it can't be mistaken for the round
+         agent dot on the other side of the notch. */
+      .strip__pin {
+        width: 3px;
+        height: 11px;
+        border-radius: 1.5px;
+        background: var(--ok);
+      }
+
+      .strip__pin[hidden] {
+        display: none;
       }
 
       /* A 3-segment micro meter for the collapsed strip. */
@@ -945,8 +944,9 @@
       <div class="strip" id="strip">
         <div class="strip__inner">
           <div class="strip__slot">
-            <span class="strip__clock" id="pill-clock">—</span>
-            <span class="strip__meridiem" id="pill-meridiem"></span>
+            <!-- The clock lives in the Day card, not here: macOS already puts one
+                 in the menu bar a few hundred points to the right. -->
+            <span class="strip__pin" id="pill-pin" hidden title="Pinned open"></span>
             <span class="strip__stat strip__stat--strong" id="pill-session"></span>
             <span class="micro" id="pill-day">
               <i class="micro__seg"></i>

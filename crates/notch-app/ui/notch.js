@@ -97,6 +97,9 @@ function setOpen(open) {
 // peek, so glancing costs nothing and reading doesn't need a held cursor.
 function setPinned(on) {
   panel().classList.toggle("panel--pinned", Boolean(on));
+  // The clamp mark is the only thing that says the panel is held, now that the
+  // clock it used to tint is gone.
+  el("pill-pin").hidden = !on;
 }
 
 el("strip").addEventListener("click", async () => {
@@ -178,19 +181,18 @@ function heatCell(block, day) {
 // --- collapsed strip ------------------------------------------------------
 
 function renderPill(p) {
-  setText("pill-clock", p.clock || "—");
-  setText("pill-meridiem", p.meridiem);
-
-  // Session % leads when the usage module is on; otherwise the clock does.
+  // A percentage in the strip always means Claude session usage. Day progress gets
+  // the meter but no number, so the two can never be read as each other.
   setText("pill-session", p.session_pct == null ? "" : `${round(p.session_pct)}%`);
 
-  // Three segments: of day progress normally, of session usage when that is on,
-  // since a limit creeping up matters more at a glance than the time does.
+  // Three segments: of session usage when that module is on, of day progress
+  // otherwise, so the strip still says something with only `day` switched on.
   const source = p.session_pct ?? p.day_pct;
   const micro = el("pill-day");
   const lit = source == null ? 0 : Math.min(3, Math.ceil(pct(source) / 33.4));
   const band = p.session_pct == null ? "" : level(pct(p.session_pct));
   micro.className = `micro${band ? ` micro--${band}` : ""}`;
+  micro.title = p.session_pct == null ? "Day elapsed" : "Claude session used";
   [...micro.children].forEach((seg, i) => seg.classList.toggle("micro__seg--on", i < lit));
 
   setText("pill-todos", p.todos ? `☑ ${p.todos}` : "");

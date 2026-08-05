@@ -100,9 +100,10 @@ fn pill(m: &Modules) -> Value {
     let git = available(&m.git);
     let todos = available(&m.todos);
 
+    // No clock here on purpose: macOS already puts one in the menu bar a few
+    // hundred points away, so the strip would only be printing it twice. The Day
+    // card inside the panel still shows it.
     json!({
-        "clock": m.day.as_ref().and_then(|d| d["clock"].as_str()).unwrap_or_default(),
-        "meridiem": m.day.as_ref().and_then(|d| d["meridiem"].as_str()).unwrap_or_default(),
         "day_pct": m.day.as_ref().and_then(|d| d["progress"].as_f64()),
         "battery_pct": m.day.as_ref().and_then(|d| d["battery"]["percent"].as_u64()),
         "charging": m.day
@@ -195,7 +196,7 @@ mod tests {
             todos: Some(json!({ "available": true, "today_count": 3 })),
         };
         let p = pill(&m);
-        assert_eq!(p["clock"], json!("2:40"));
+        assert_eq!(p["day_pct"], json!(61.1));
         assert_eq!(p["battery_pct"], json!(95));
         assert_eq!(p["session_pct"], json!(42.0));
         assert_eq!(p["resets_in"], json!("3h52m"));
@@ -207,8 +208,7 @@ mod tests {
     #[test]
     fn the_pill_tolerates_every_module_being_absent() {
         let p = pill(&Modules::default());
-        assert_eq!(p["clock"], json!(""), "an empty string, not null");
-        assert_eq!(p["resets_in"], json!(""));
+        assert_eq!(p["resets_in"], json!(""), "an empty string, not null");
         for key in [
             "day_pct",
             "battery_pct",
@@ -237,6 +237,20 @@ mod tests {
         assert_eq!(p["resets_in"], json!(""));
         assert!(p["commits"].is_null());
         assert!(p["todos"].is_null());
+    }
+
+    #[test]
+    fn the_pill_carries_no_clock() {
+        // macOS already shows one in the menu bar; the strip must not print it
+        // twice, so the reduction should not offer it at all.
+        let m = Modules {
+            day: Some(a_day()),
+            ..Default::default()
+        };
+        let p = pill(&m);
+        assert!(p["clock"].is_null(), "the strip has no clock");
+        assert!(p["meridiem"].is_null());
+        assert_eq!(p["day_pct"], json!(61.1), "the meter still gets the day");
     }
 
     #[test]
