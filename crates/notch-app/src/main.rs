@@ -77,9 +77,23 @@ fn reconcile(app: &AppHandle) {
 /// off the main thread.
 #[tauri::command]
 async fn notch_payload() -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(hud::payload)
+    let payload = tauri::async_runtime::spawn_blocking(hud::payload)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // A panel drawing nothing looks the same whether the page never asked or the
+    // answer was empty. Under NOTCH_DEBUG, say which.
+    if std::env::var_os("NOTCH_DEBUG").is_some() {
+        eprintln!(
+            "notch: payload day={} pinned={}",
+            if payload["day"].is_null() {
+                "off"
+            } else {
+                "on"
+            },
+            payload["pinned"]
+        );
+    }
+    Ok(payload)
 }
 
 /// Screen geometry the panel needs to lay itself out around the physical notch,

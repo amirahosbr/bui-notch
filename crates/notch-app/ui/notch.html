@@ -349,9 +349,12 @@
         color: var(--ink-muted);
       }
 
-      /* :not([hidden]) so the UA's [hidden] rule still wins before the first
-         reading lands. */
-      .batt[hidden] {
+      /* Any `display` of our own outranks the UA's [hidden] rule, so every
+         element the script hides has to say so itself. Without this the battery
+         shows an empty shell before the first reading lands, and a card whose
+         module is switched off stays on screen. */
+      .batt[hidden],
+      .card[hidden] {
         display: none;
       }
 
@@ -536,8 +539,18 @@
         <!-- Dynamic-island style: rest on a pill to page through detail without
              leaving the notch or opening a window. -->
         <div class="tabs" id="tabs" role="tablist" aria-label="Views">
-          <button class="tab tab--on" data-tab="overview" type="button" role="tab">Overview</button>
-          <button class="tab" data-tab="day" type="button" role="tab">Day</button>
+          <button
+            class="tab tab--on"
+            data-tab="overview"
+            type="button"
+            role="tab"
+            aria-selected="true"
+          >
+            Overview
+          </button>
+          <button class="tab" data-tab="day" type="button" role="tab" aria-selected="false">
+            Day
+          </button>
         </div>
 
         <div class="view view--on" id="view-overview" role="tabpanel" aria-label="Overview">

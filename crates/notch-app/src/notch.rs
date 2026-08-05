@@ -348,13 +348,9 @@ fn open_dwell() -> Duration {
 
 /// Whether the cursor is inside the panel's current bounds.
 fn cursor_over_panel(expanded: bool) -> bool {
-    panel_local_cursor(expanded).is_some()
-}
-
-/// The cursor's position *within* the panel's current bounds, or `None` when it's
-/// outside. Panel-local because that's what the page can hit-test against.
-fn panel_local_cursor(expanded: bool) -> Option<(f64, f64)> {
-    let (cx, cy) = cursor()?;
+    let Some((cx, cy)) = cursor() else {
+        return false;
+    };
     let m = metrics();
     let size = if expanded {
         m.expanded_size()
@@ -364,12 +360,11 @@ fn panel_local_cursor(expanded: bool) -> Option<(f64, f64)> {
     inside(size, m.screen_w, cx, cy)
 }
 
-/// The cursor's panel-local position, given the panel's size on a screen of
+/// Whether `(cx, cy)` falls inside a centred panel of `size` on a screen of
 /// `screen_w`. Pure, so the hit test can be checked without a cursor or a screen.
-fn inside(size: LogicalSize<f64>, screen_w: f64, cx: f64, cy: f64) -> Option<(f64, f64)> {
+fn inside(size: LogicalSize<f64>, screen_w: f64, cx: f64, cy: f64) -> bool {
     let x0 = ((screen_w - size.width) / 2.0).max(0.0);
-    let within = cx >= x0 && cx <= x0 + size.width && cy >= 0.0 && cy <= size.height;
-    within.then_some((cx - x0, cy))
+    cx >= x0 && cx <= x0 + size.width && cy >= 0.0 && cy <= size.height
 }
 
 /// The panel's own left edge, which is where the *window* starts. While open the
@@ -556,30 +551,21 @@ mod tests {
     fn the_hit_test_covers_the_panel_and_nothing_else() {
         // A 100pt-wide panel on a 1000pt screen sits from x=450 to x=550.
         let size = LogicalSize::new(100.0, 30.0);
-        assert_eq!(
-            inside(size, 1000.0, 500.0, 15.0),
-            Some((50.0, 15.0)),
-            "centre"
-        );
-        assert!(
-            inside(size, 1000.0, 450.0, 0.0).is_some(),
-            "top-left corner"
-        );
-        assert!(
-            inside(size, 1000.0, 550.0, 30.0).is_some(),
-            "bottom-right corner"
-        );
-        assert!(inside(size, 1000.0, 449.0, 15.0).is_none(), "just left");
-        assert!(inside(size, 1000.0, 551.0, 15.0).is_none(), "just right");
-        assert!(inside(size, 1000.0, 500.0, 31.0).is_none(), "just below");
+        assert!(inside(size, 1000.0, 500.0, 15.0), "centre");
+        assert!(inside(size, 1000.0, 450.0, 0.0), "top-left corner");
+        assert!(inside(size, 1000.0, 550.0, 30.0), "bottom-right corner");
+        assert!(!inside(size, 1000.0, 449.0, 15.0), "just left");
+        assert!(!inside(size, 1000.0, 551.0, 15.0), "just right");
+        assert!(!inside(size, 1000.0, 500.0, 31.0), "just below");
+        assert!(!inside(size, 1000.0, 500.0, -1.0), "above the screen edge");
     }
 
     #[test]
     fn the_hit_test_survives_a_panel_wider_than_the_screen() {
         // The panel is clamped to x=0 rather than going negative.
         let size = LogicalSize::new(600.0, 30.0);
-        assert_eq!(inside(size, 400.0, 0.0, 0.0), Some((0.0, 0.0)));
-        assert!(inside(size, 400.0, 399.0, 10.0).is_some());
+        assert!(inside(size, 400.0, 0.0, 0.0));
+        assert!(inside(size, 400.0, 399.0, 10.0));
     }
 
     #[test]

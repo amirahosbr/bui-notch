@@ -219,10 +219,6 @@ function restartPolling(ms) {
 let hotTab = null;
 let hotSince = 0;
 
-function activeTab() {
-  return document.querySelector(".tab--on")?.dataset.tab ?? "overview";
-}
-
 function setTab(name) {
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.tab === name;
@@ -272,7 +268,6 @@ window.notchHud = {
   setPinned,
   refresh: load,
   cursor,
-  activeTab,
 };
 
 // Data first, and never gated on IPC for the geometry: the numbers are the whole
