@@ -89,6 +89,48 @@ file. Each fails quietly and separately, so a blank card looks the same whicheve
 one it was. `doctor` asks all of them at once, skips the checks belonging to
 switched-off modules, and names the command that fixes each failure.
 
+## The to-do briefing
+
+The `todos` module renders a JSON file and nothing more. It holds no credentials and
+never talks to Slack, Gmail, or any tracker — so this app never has to ask anyone for
+access to their messages.
+
+Something else writes that file. Shipped here is `/todo-brief`, a Claude Code
+command that reads **Slack and Gmail** through the connectors your own session
+already has, picks out the week's action items, sorts them into today / this week /
+in progress / done, and writes the briefing:
+
+```bash
+notch module todos on
+# then, in a Claude Code session with the Slack and Gmail connectors:
+/todo-brief
+```
+
+Any producer will do, as long as it writes the right shape in the right place:
+
+```bash
+notch todos           # print the briefing, and how old it is
+notch todos path      # the file to write
+notch todos schema    # an example document to copy
+notch todos clear      # delete it
+```
+
+### It cannot be scheduled
+
+`/todo-brief` only works in a session that **actually has the connectors**. A
+headless `claude -p` has no Slack or Gmail tools at all, so cron cannot drive it —
+it would either fail or, worse, invent items to fill the sections. The command
+checks for the tools first and refuses rather than guessing.
+
+This is a limitation of the design, not a bug: keeping the credentials out of the
+HUD is the whole point, and the price is that the briefing is produced by hand from
+a session that has them. If only one connector is present the command carries on
+with that source alone and records which one it used in `source`, so the HUD never
+claims coverage it didn't have.
+
+The HUD shows the briefing's age and marks it **stale after 36 hours**, so an old
+briefing announces itself rather than quietly passing as today's.
+
 ## What leaves your machine
 
 Three of the five modules read nothing but your own computer. Two make network
@@ -98,7 +140,7 @@ calls, and it's worth knowing which:
 | --- | --- |
 | `day` | The system clock, and `pmset` for the battery. Local. |
 | `sessions` | The transcript files in `~/.claude/projects`. Local. |
-| `todos` | A JSON file another process writes. Local — nothing here talks to Slack or any tracker. |
+| `todos` | A JSON file another process writes. Local — the HUD itself talks to neither Slack nor Gmail. |
 | `usage` | **A request to `api.anthropic.com`.** |
 | `git` | **`gh api` calls to GitHub.** |
 
