@@ -21,6 +21,39 @@ underneath.
 Requires macOS. A notch is not required — without one the sliver falls back to a
 fixed width and sits in the menu-bar row all the same.
 
+![The collapsed sliver in the menu-bar row](docs/screenshots/strip.png)
+
+![The panel open, showing Claude usage and the day](docs/screenshots/overview.png)
+
+<details>
+<summary>The to-do briefing, the usage detail, and the attention interrupt</summary>
+
+**To-do** — the briefing, in the four sections its producer writes.
+
+![The To-do tab](docs/screenshots/todo.png)
+
+**Usage** — session and weekly limits, 7-day peaks, and one row per real reset
+window.
+
+![The Usage tab](docs/screenshots/usage.png)
+
+**Attention** — an agent stopped and is waiting. The panel opened by itself and shows
+what it is asking, with the agent's own option labels.
+
+![The attention banner](docs/screenshots/attention.png)
+
+Once it closes again the sliver keeps saying so, for as long as the agent is still
+waiting.
+
+![The sliver marking a waiting agent](docs/screenshots/strip-waiting.png)
+
+</details>
+
+> The Sessions and Git tabs are not pictured. Both render real data — transcript
+> previews, private repository names — and no screenshot of them could be published
+> without publishing some of that. The `todos` shots above use invented names for
+> the same reason. Run it yourself to see those two.
+
 ## Install
 
 You need [Rust](https://rustup.rs) (`brew install rustup && rustup default stable`).
