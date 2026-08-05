@@ -7,6 +7,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use notch_core::config::{self, NotchConfig, MAX_OPEN_DELAY_MS, MODULES};
+use notch_core::doctor::{self, State};
+use notch_core::todos as notch_todos;
 
 #[derive(Parser)]
 #[command(
@@ -44,6 +46,36 @@ enum Action {
         #[arg(default_value = "toggle")]
         state: String,
     },
+    /// Hold the panel open, or let it close on the cursor again.
+    Pin {
+        /// on | off | toggle (default: toggle).
+        #[arg(default_value = "toggle")]
+        state: String,
+    },
+    /// Show the to-do briefing, or where and how to write one.
+    Todos {
+        #[command(subcommand)]
+        action: Option<TodosAction>,
+    },
+    /// Check that everything the HUD depends on is actually wired up.
+    ///
+    /// Start here when the panel is showing less than you expected: each module
+    /// needs something outside this app, and they fail quietly and separately.
+    Doctor {
+        /// Print JSON instead, and exit non-zero on a real failure.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TodosAction {
+    /// Print the file a producer should write to.
+    Path,
+    /// Print the shape a producer should write, as JSON.
+    Schema,
+    /// Delete the briefing.
+    Clear,
 }
 
 fn main() -> Result<()> {
@@ -63,6 +95,125 @@ fn run(action: Option<&Action>, cfg: &NotchConfig) -> Result<()> {
         Some(Action::Toggle) => set(cfg, "enabled", !cfg.enabled),
         Some(Action::Delay { ms }) => set_delay(cfg, *ms),
         Some(Action::Module { name, state }) => set_module(cfg, name, state),
+        Some(Action::Pin { state }) => set_pin(cfg, state),
+        Some(Action::Todos { action }) => todos(action.as_ref()),
+        Some(Action::Doctor { json }) => run_doctor(*json),
+    }
+}
+
+/// Prints the briefing, or tells a producer where and how to write one.
+fn todos(action: Option<&TodosAction>) -> Result<()> {
+    match action {
+        Some(TodosAction::Path) => {
+            println!("{}", notch_todos::path().display());
+            Ok(())
+        }
+        Some(TodosAction::Schema) => {
+            println!("{}", serde_json::to_string_pretty(&notch_todos::schema())?);
+            Ok(())
+        }
+        Some(TodosAction::Clear) => {
+            notch_todos::clear()?;
+            println!("briefing cleared");
+            Ok(())
+        }
+        None => print_briefing(),
+    }
+}
+
+/// The four sections as text, so a producer can show its own work in a transcript.
+fn print_briefing() -> Result<()> {
+    let Some(b) = notch_todos::load()? else {
+        println!("no briefing yet");
+        println!();
+        println!("a producer should write {}", notch_todos::path().display());
+        println!("in the shape `notch todos schema` prints — /todo-brief does this");
+        return Ok(());
+    };
+
+    for (label, items) in [
+        ("Today", &b.today),
+        ("This week", &b.week),
+        ("In progress", &b.in_progress),
+        ("Done", &b.done),
+    ] {
+        println!("{label} ({})", items.len());
+        for item in items {
+            let src: Vec<&str> = [item.channel.as_deref(), item.who.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect();
+            let where_from = if src.is_empty() {
+                String::new()
+            } else {
+                format!("  [{}]", src.join(" · "))
+            };
+            println!("  • {}{where_from}", item.text);
+        }
+        println!();
+    }
+
+    match b.age_hours() {
+        Some(h) => println!(
+            "briefed {h}h ago{}",
+            if b.stale() { " — stale" } else { "" }
+        ),
+        None => println!("briefing has no timestamp, so its age is unknown"),
+    }
+    if let Some(source) = &b.source {
+        println!("source: {source}");
+    }
+    Ok(())
+}
+
+/// Holds the panel open, or lets it close again. A running app adopts this on its
+/// next reconcile tick, so it lands within a few seconds.
+fn set_pin(cfg: &NotchConfig, state: &str) -> Result<()> {
+    let want = match state.to_ascii_lowercase().as_str() {
+        "on" => true,
+        "off" => false,
+        "toggle" => !cfg.pinned,
+        other => anyhow::bail!("expected on, off, or toggle — got '{other}'"),
+    };
+    config::save(&cfg.with("pinned", want)?)?;
+    println!("panel {}", if want { "pinned open" } else { "unpinned" });
+    Ok(())
+}
+
+/// Prints every check, and exits non-zero on a real failure so a script can gate
+/// on it.
+fn run_doctor(as_json: bool) -> Result<()> {
+    let checks = doctor::run();
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&checks)?);
+    } else {
+        for c in &checks {
+            let mark = match c.state {
+                State::Ok => "✓",
+                State::Fail => "✗",
+                State::Skipped => "–",
+            };
+            println!("{mark} {:<9} {:<26} {}", c.module, c.name, c.detail);
+            if let Some(fix) = &c.fix {
+                println!("               → {fix}");
+            }
+        }
+        println!();
+        println!(
+            "{}",
+            if doctor::healthy(&checks) {
+                "everything the switched-on modules need is wired up."
+            } else {
+                "something a switched-on module needs is missing — see the arrows above."
+            }
+        );
+    }
+
+    if doctor::healthy(&checks) {
+        Ok(())
+    } else {
+        std::process::exit(1);
     }
 }
 
@@ -121,8 +272,11 @@ fn print_status(cfg: &NotchConfig) {
     println!("notch on | off | toggle");
     println!("notch delay <ms>");
     println!("notch module <name> [on|off|toggle]");
+    println!("notch pin [on|off|toggle]");
+    println!("notch todos [path|schema|clear]");
+    println!("notch doctor");
     println!();
-    println!("Click the sliver to pin the panel open.");
+    println!("Click the sliver to pin the panel open, or use `notch pin`.");
 }
 
 fn describe_delay(ms: u64) -> String {
@@ -204,6 +358,14 @@ mod tests {
             vec!["notch", "delay", "600"],
             vec!["notch", "module", "day"],
             vec!["notch", "module", "day", "off"],
+            vec!["notch", "pin"],
+            vec!["notch", "pin", "on"],
+            vec!["notch", "todos"],
+            vec!["notch", "todos", "path"],
+            vec!["notch", "todos", "schema"],
+            vec!["notch", "todos", "clear"],
+            vec!["notch", "doctor"],
+            vec!["notch", "doctor", "--json"],
         ] {
             assert!(
                 Cli::try_parse_from(&args).is_ok(),

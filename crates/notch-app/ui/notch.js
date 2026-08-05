@@ -1,6 +1,10 @@
 // notch.js — the notch HUD. Collapsed it fills the menu-bar row either side of
 // the physical notch; Rust grows the window when the cursor arrives, and this page
 // follows the window's own size rather than guessing at hover state.
+//
+// Every row is built with createElement and textContent, never innerHTML: some of
+// what lands here comes from a transcript, a `gh` response or a briefing written by
+// a language model, and none of it should ever be able to act as markup.
 
 const { invoke } = window.__TAURI__.core;
 
@@ -8,12 +12,49 @@ const POLL_COLLAPSED_MS = 15000;
 const POLL_EXPANDED_MS = 5000;
 /// How long the cursor must rest on a tab pill before it switches.
 const TAB_DWELL_MS = 250;
+/// Session rows the Overview shows before deferring to the Sessions tab. The
+/// panel's height in notch.rs (EXPANDED_H) is sized for this — change both.
+const SESSION_ROWS = 5;
+/// Days of the heatmap the Overview strip draws; the Git tab draws all 90.
+const OVERVIEW_HEAT_DAYS = 30;
+/// Pushes the Git tab lists.
+const PUSH_ROWS = 40;
 
 const el = (id) => document.getElementById(id);
 const panel = () => el("panel");
 
 let pollTimer = null;
 let lastPayload = null;
+
+// --- DOM helpers ----------------------------------------------------------
+
+/// A `<tag class="cls">text</tag>` node. Text goes in as text, so nothing in the
+/// payload can be read as markup — no escaping to get right.
+function node(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+
+/// Replaces an element's children in one go.
+function fill(parent, children) {
+  parent.replaceChildren(...(Array.isArray(children) ? children : [children]));
+}
+
+/// A one-line "nothing here" placeholder.
+function empty(text) {
+  return node("p", "empty", text);
+}
+
+/// Renders `rows` through `build`, or the placeholder when there are none.
+function fillRows(parent, rows, build, emptyText) {
+  fill(parent, rows.length ? rows.map(build) : empty(emptyText));
+}
+
+function setText(id, text) {
+  el(id).textContent = text ?? "";
+}
 
 // --- geometry -------------------------------------------------------------
 
@@ -34,9 +75,9 @@ async function applyMetrics() {
 // --- open / close ---------------------------------------------------------
 
 // Rust owns the hover decision and calls setOpen: a webview's own mouseenter only
-// fires once its window is key, and this panel never takes focus, so it would
-// only work after you clicked it. The window stays one size; only this class
-// changes, and CSS animates the shape.
+// fires once its window is key, and this panel never takes focus, so it would only
+// work after you clicked it. The window stays one size; only this class changes,
+// and CSS animates the shape.
 function setOpen(open) {
   panel().classList.toggle("panel--open", open);
   if (open) {
@@ -56,6 +97,9 @@ function setOpen(open) {
 // peek, so glancing costs nothing and reading doesn't need a held cursor.
 function setPinned(on) {
   panel().classList.toggle("panel--pinned", Boolean(on));
+  // The clamp mark is the only thing that says the panel is held, now that the
+  // clock it used to tint is gone.
+  el("pill-pin").hidden = !on;
 }
 
 el("strip").addEventListener("click", async () => {
@@ -73,61 +117,141 @@ function pct(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
 }
 
-/// Meters and the battery are sized through a custom property rather than a
-/// direct style write, so the stylesheet keeps ownership of how it is drawn.
-function setFill(id, value) {
-  el(id).style.setProperty("--pct", `${pct(value)}%`);
+function round(value) {
+  return Math.round(pct(value));
 }
 
-/// Mirrors the visible value for anything reading the tree instead of the pixels.
-function setProgress(id, value) {
-  el(id).setAttribute("aria-valuenow", String(Math.round(pct(value))));
+/// The band a usage percentage falls in, which decides the meter's colour.
+function level(value) {
+  if (value >= 90) return "danger";
+  if (value >= 70) return "warn";
+  return "";
 }
 
-// --- rendering ------------------------------------------------------------
+/// Meters and the battery are sized through a custom property rather than a direct
+/// style write, so the stylesheet keeps ownership of how it is drawn.
+function setMeter(fillId, trackId, value, modifier) {
+  const kind = modifier === undefined ? level(pct(value)) : modifier;
+  const fillEl = el(fillId);
+  fillEl.style.setProperty("--pct", `${pct(value)}%`);
+  fillEl.className = `meter__fill${kind ? ` meter__fill--${kind}` : ""}`;
+  el(trackId).setAttribute("aria-valuenow", String(round(value)));
+}
+
+/// 8s / 4m / 1h20m — short enough for a 9px column.
+function ago(secs) {
+  if (secs == null || secs < 0) return "";
+  if (secs < 60) return `${Math.round(secs)}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return m ? `${h}h${m}m` : `${h}h`;
+}
+
+/// "4m" / "3h" / "2d" from an RFC3339 timestamp.
+function since(iso) {
+  const t = Date.parse(iso);
+  if (!t) return "";
+  return ago(Math.max(0, (Date.now() - t) / 1000));
+}
+
+/// "resets 3h52m · Tue 2:40 AM" — the countdown and the clock time it ends at.
+function resetLine(w) {
+  if (!w?.resets_in) return "";
+  return w.resets_at ? `resets ${w.resets_in} · ${w.resets_at}` : `resets ${w.resets_in}`;
+}
+
+/// Which heat band a day's commit count falls in.
+function heatLevel(count) {
+  if (!count) return "";
+  if (count <= 2) return "l1";
+  if (count <= 6) return "l2";
+  if (count <= 12) return "l3";
+  return "l4";
+}
+
+/// One heat cell, for either the strip or the 90-day grid.
+function heatCell(block, day) {
+  const lvl = heatLevel(day.count);
+  const cell = node("i", `${block}${lvl ? ` ${block}--${lvl}` : ""}`);
+  cell.title = `${day.date}: ${day.count}`;
+  return cell;
+}
+
+// --- collapsed strip ------------------------------------------------------
 
 function renderPill(p) {
-  el("pill-clock").textContent = p.clock || "—";
-  el("pill-meridiem").textContent = p.meridiem ?? "";
+  // Left slot, in order: how long until the session resets, how much of it is
+  // gone, and the same as a meter. No battery and no clock anywhere in the strip —
+  // macOS draws both, and a second bare percentage could not be told apart from
+  // the session's.
+  setText("pill-resets", p.resets_in ? `↻ ${p.resets_in}` : "");
 
-  // Three segments of day progress: morning, afternoon, evening at a glance.
-  const lit = p.day_pct == null ? 0 : Math.min(3, Math.ceil(pct(p.day_pct) / 33.4));
-  [...el("pill-day").children].forEach((seg, i) => {
-    seg.classList.toggle("micro__seg--on", i < lit);
-  });
+  // A percentage in the strip always means Claude session usage. Day progress gets
+  // the meter but no number, so the two can never be read as each other.
+  setText("pill-session", p.session_pct == null ? "" : `${round(p.session_pct)}%`);
 
-  const batt = p.battery_pct;
-  el("pill-batt").textContent = batt == null ? "" : `${batt}%${p.charging ? " ⚡" : ""}`;
+  // Three segments: of session usage when that module is on, of day progress
+  // otherwise, so the strip still says something with only `day` switched on.
+  const source = p.session_pct ?? p.day_pct;
+  const micro = el("pill-day");
+  const lit = source == null ? 0 : Math.min(3, Math.ceil(pct(source) / 33.4));
+  const band = p.session_pct == null ? "" : level(pct(p.session_pct));
+  micro.className = `micro${band ? ` micro--${band}` : ""}`;
+  micro.title = p.session_pct == null ? "Day elapsed" : "Claude session used";
+  [...micro.children].forEach((seg, i) => seg.classList.toggle("micro__seg--on", i < lit));
+
+  setText("pill-todos", p.todos ? `☑ ${p.todos}` : "");
+  setText("pill-commits", p.commits == null ? "" : `⎇ ${p.commits}`);
+
+  const agents = p.agents ?? 0;
+  el("pill-dot").hidden = !agents;
+  el("pill-dot").className = `dot${agents ? " dot--live" : ""}`;
+  setText("pill-agents", agents ? String(agents) : "");
 }
 
-function renderDayCards(d) {
-  const shown = Boolean(d);
-  el("card-clock").hidden = !shown;
-  el("card-week").hidden = !shown;
-  if (!shown) return;
+// --- overview: usage card -------------------------------------------------
 
-  el("d-clock").textContent = d.clock ?? "—";
-  el("d-meridiem").textContent = d.meridiem ?? "";
-  el("d-date").textContent = d.date ?? "";
-  el("d-remaining").textContent = d.remaining ?? "";
-  setFill("d-day-fill", d.progress);
-  setProgress("d-day-track", d.progress);
+function renderUsageCard(u) {
+  el("card-usage").hidden = !u;
+  if (!u) return;
 
-  el("d-week-pct").textContent = `${Math.round(pct(d.week_progress))}%`;
-  setFill("d-week-fill", d.week_progress);
-  setProgress("d-week-track", d.week_progress);
-  el("d-week-note").textContent = weekNote(d.week_progress);
+  if (!u.available) {
+    setText("u-session", "—");
+    setText("u-session-reset", u.error ?? "unavailable");
+    setText("u-week", "—");
+    setText("u-week-reset", "");
+    setMeter("u-session-fill", "u-session-track", 0, "neutral");
+    setMeter("u-week-fill", "u-week-track", 0, "neutral");
+    return;
+  }
+
+  const s = u.session ?? {};
+  const w = u.week ?? {};
+  setText("u-session", `${round(s.percent)}%`);
+  setText("u-session-reset", resetLine(s));
+  setText("u-week", `${round(w.percent)}%`);
+  setText("u-week-reset", resetLine(w));
+  setMeter("u-session-fill", "u-session-track", s.percent);
+  setMeter("u-week-fill", "u-week-track", w.percent);
+}
+
+// --- overview: day card ---------------------------------------------------
+
+function renderDayCard(d) {
+  el("card-day").hidden = !d;
+  if (!d) return;
+
+  setText("d-clock", d.clock ?? "—");
+  setText("d-meridiem", d.meridiem);
+  setText("d-date", d.date);
+  setText("d-remaining", d.remaining);
+  setMeter("d-day-fill", "d-day-track", d.progress, "neutral");
+
+  setText("d-week-pct", `${round(d.week_progress)}%`);
+  setMeter("d-week-fill", "d-week-track", d.week_progress, "neutral");
 
   renderBattery(d.battery);
-}
-
-/// Says where in the week you are, which a bare percentage does not.
-function weekNote(weekPct) {
-  const done = pct(weekPct);
-  if (done < 20) return "The week is just starting.";
-  if (done < 50) return "Not yet halfway through the week.";
-  if (done < 80) return "Past the middle of the week.";
-  return "The week is nearly done.";
 }
 
 function renderBattery(b) {
@@ -135,67 +259,308 @@ function renderBattery(b) {
   wrap.hidden = !b;
   if (!b) return;
 
-  el("d-batt-pct").textContent = `${b.percent}%`;
-  setFill("d-batt-fill", b.percent);
-  const fill = el("d-batt-fill");
-  fill.classList.toggle("batt__fill--charging", Boolean(b.charging));
-  fill.classList.toggle("batt__fill--low", !b.charging && b.percent <= 15);
+  setText("d-batt-pct", `${b.percent}%`);
+  const fillEl = el("d-batt-fill");
+  fillEl.style.setProperty("--pct", `${pct(b.percent)}%`);
+  const state = b.charging ? "charging" : b.percent <= 15 ? "low" : "";
+  fillEl.className = `batt__fill${state ? ` batt__fill--${state}` : ""}`;
   wrap.title = `Battery ${b.percent}% — ${b.state}`;
 }
 
-/// A `<tag class="cls">text</tag>` node. Text goes in as text, so nothing in the
-/// payload can be read as markup — no escaping to get right, and no innerHTML.
-function node(tag, cls, text) {
-  const n = document.createElement(tag);
-  n.className = cls;
-  n.textContent = text;
-  return n;
-}
+// --- overview: contributions card ----------------------------------------
 
-/// Replaces an element's children in one go.
-function fill(parent, children) {
-  parent.replaceChildren(...children);
-}
+function renderGitCard(g) {
+  el("card-git").hidden = !g;
+  if (!g) return;
 
-/// The readings the Day tab spells out, as key/value pairs.
-function dayFacts(d) {
-  return [
-    ["Time", `${d.clock ?? "—"} ${d.meridiem ?? ""}`.trim()],
-    ["Date", d.date ?? "—"],
-    ["Day elapsed", `${Math.round(pct(d.progress))}%`],
-    ["Left today", d.remaining ?? "—"],
-    ["Week elapsed", `${Math.round(pct(d.week_progress))}%`],
-    ["Battery", d.battery ? `${d.battery.percent}% — ${d.battery.state}` : "no battery"],
-  ];
-}
-
-/// The Day tab: the same readings spelled out, for when a meter is not enough.
-function renderDayFacts(d) {
-  const list = el("day-facts");
-  if (!d) {
-    fill(list, [node("p", "empty", "The day module is off — run: notch module day on")]);
+  if (!g.available) {
+    setText("g-today", "—");
+    // `gh` takes seconds; a cold cache is pending, not broken.
+    setText("g-week", g.pending ? "loading…" : "gh unavailable");
+    fill(el("g-heat"), []);
+    setText("g-prs", "");
+    setText("g-login", "");
     return;
   }
 
+  setText("g-today", g.today ?? 0);
+  setText("g-week", `${g.week ?? 0} this week`);
+  setText("g-prs", `${(g.open_prs ?? []).length} open PRs`);
+  setText("g-login", g.login ? `@${g.login}` : "");
+
+  // The payload carries 90 days for the Git tab, so take the tail.
+  const days = (g.heatmap ?? []).slice(-OVERVIEW_HEAT_DAYS);
   fill(
-    list,
-    dayFacts(d).map(([key, value]) => {
-      const row = node("div", "facts__row", "");
-      row.append(node("dt", "facts__key", key), node("dd", "facts__val", value));
-      return row;
-    }),
+    el("g-heat"),
+    days.map((d) => heatCell("heat__cell", d)),
   );
 }
+
+// --- sessions -------------------------------------------------------------
+
+/// One session row, shared by the Overview and the Sessions tab.
+function sessionRow(r) {
+  const row = node("div", "sess");
+  const state = r.status === "active" ? "live" : r.status === "tool" ? "tool" : "";
+  row.append(node("span", `dot${state ? ` dot--${state}` : ""}`));
+
+  const head = node("div", "sess__head");
+  head.append(node("span", "sess__title", r.title));
+  if (r.model) head.append(node("span", "chip", r.model));
+
+  // An untitled session falls back to its project name; don't print it twice.
+  const branch = r.branch ? `⎇ ${r.branch}` : "";
+  const where = r.title === r.project ? branch : [r.project, branch].filter(Boolean).join(" ");
+  if (where) head.append(node("span", "sess__where", where));
+  head.append(node("span", "sess__meta", `${r.messages} msgs · ${ago(r.idle_secs)}`));
+
+  const main = node("div", "sess__main");
+  main.append(head);
+  if (r.preview) main.append(node("div", "sess__preview", r.preview));
+  row.append(main);
+  return row;
+}
+
+const NO_SESSIONS = "No sessions in the last 12 hours.";
+
+/// The Overview's list: the newest few, with a note about the rest.
+function renderSessionsCard(s) {
+  el("pane-agents").hidden = !s;
+  if (!s) return;
+
+  const list = el("agent-list");
+  const more = el("agent-more");
+
+  if (!s.available) {
+    setText("a-count", "");
+    fill(list, empty(s.error ?? "unavailable"));
+    more.hidden = true;
+    return;
+  }
+
+  setText("a-count", s.active ? `· ${s.active} active` : "");
+  const all = s.list ?? [];
+  const rows = all.slice(0, SESSION_ROWS);
+  const hidden = all.length - rows.length;
+  more.hidden = hidden <= 0;
+  more.textContent = hidden > 0 ? `+${hidden} older ${hidden === 1 ? "session" : "sessions"}` : "";
+
+  fillRows(list, rows, sessionRow, NO_SESSIONS);
+}
+
+/// The Sessions tab: everything, scrollable, no cap.
+function renderSessionsTab(s) {
+  const list = el("session-list");
+  if (!s) {
+    setText("s-count", "");
+    fill(list, empty("The sessions module is off — run: notch module sessions on"));
+    return;
+  }
+  if (!s.available) {
+    setText("s-count", "");
+    fill(list, empty(s.error ?? "unavailable"));
+    return;
+  }
+  const all = s.list ?? [];
+  setText("s-count", all.length ? `· ${all.length}` : "");
+  fillRows(list, all, sessionRow, NO_SESSIONS);
+}
+
+// --- to-do ---------------------------------------------------------------
+
+const TODO_SECTIONS = [
+  ["td-today", "td-today-n", "today", "Nothing urgent today 🎉"],
+  ["td-week", "td-week-n", "week", "All clear for the week!"],
+  ["td-prog", "td-prog-n", "in_progress", "Nothing in progress."],
+  ["td-done", "td-done-n", "done", "Nothing marked done yet."],
+];
+
+function todoRow(item, done) {
+  const row = node("div", `todo${done ? " todo--done" : ""}`);
+  row.append(node("span", "todo__mark", done ? "✓" : "•"));
+
+  const text = node("span", "todo__text", item.text);
+  const src = [item.channel, item.who].filter(Boolean).join(" · ");
+  if (src) {
+    text.append(document.createTextNode(" "), node("span", "todo__src", src));
+  }
+  row.append(text);
+  return row;
+}
+
+/// The briefing, in the four sections its producer writes. Nothing here talks to
+/// Slack — this only renders the file.
+function renderTodos(t) {
+  const foot = el("td-foot");
+
+  if (!t?.available) {
+    const why = !t
+      ? "The to-do module is off — run: notch module todos on"
+      : t.missing
+        ? `No briefing yet — have a producer write ${t.path ?? "todos.json"}`
+        : (t.error ?? "unavailable");
+    for (const [listId, countId] of TODO_SECTIONS) {
+      fill(el(listId), empty("—"));
+      setText(countId, "");
+    }
+    fill(el("td-today"), empty(why));
+    foot.textContent = "";
+    foot.className = "foot";
+    return;
+  }
+
+  for (const [listId, countId, key, emptyText] of TODO_SECTIONS) {
+    const rows = t[key] ?? [];
+    setText(countId, rows.length ? String(rows.length) : "");
+    fillRows(el(listId), rows, (item) => todoRow(item, key === "done"), emptyText);
+  }
+
+  // A briefing nobody refreshed is worse than none, so say how old it is.
+  const age = t.age_hours;
+  foot.textContent =
+    age == null
+      ? "briefing has no timestamp"
+      : `briefed ${age === 0 ? "under an hour" : ago(age * 3600)} ago${t.stale ? " — stale" : ""}`;
+  foot.className = t.stale ? "foot foot--warn" : "foot";
+}
+
+// --- usage tab -----------------------------------------------------------
+
+function renderUsageTab(u) {
+  if (!u?.available) {
+    setText("ut-status", u ? "" : "module off");
+    setText("ut-session", "—");
+    setText("ut-week", "—");
+    setText("ut-session-reset", !u ? "run: notch module usage on" : (u.error ?? "unavailable"));
+    setText("ut-week-reset", "");
+    setMeter("ut-session-fill", "ut-session-track", 0, "neutral");
+    setMeter("ut-week-fill", "ut-week-track", 0, "neutral");
+    return;
+  }
+
+  const s = u.session ?? {};
+  const w = u.week ?? {};
+  setText("ut-status", u.status);
+  setText("ut-session", `${round(s.percent)}%`);
+  setText("ut-session-reset", resetLine(s));
+  setText("ut-week", `${round(w.percent)}%`);
+  setText("ut-week-reset", resetLine(w));
+  setMeter("ut-session-fill", "ut-session-track", s.percent);
+  setMeter("ut-week-fill", "ut-week-track", w.percent);
+}
+
+/// The reset-window list. Grouping happens in Rust (see history::windows) — one
+/// row per real Anthropic window, newest first.
+function renderWindows(d) {
+  const box = el("ut-windows");
+  if (!d?.available) {
+    fill(box, empty(d?.error ?? "no history yet"));
+    return;
+  }
+
+  const sPeak = round(d.session_peak);
+  const wPeak = round(d.week_peak);
+  setText("ut-speak", `${sPeak}%`);
+  setText("ut-wpeak", `${wPeak}%`);
+
+  fillRows(
+    box,
+    d.windows ?? [],
+    (w) => {
+      const sHi = round(w.session_peak);
+      const wHi = round(w.week_high);
+      const wLo = round(w.week_low);
+
+      const row = node("div", "win");
+      row.append(node("span", "win__when", w.label));
+      row.append(node("b", `win__session${sHi === sPeak ? " win__session--peak" : ""}`, `${sHi}%`));
+      row.append(
+        node(
+          "span",
+          `win__week${wHi === wPeak ? " win__week--peak" : ""}`,
+          wLo === wHi ? `${wHi}%` : `${wLo}–${wHi}%`,
+        ),
+      );
+      return row;
+    },
+    "No samples in the last 7 days.",
+  );
+}
+
+/// Fetched only for the Usage tab — 7 days of samples is more than the strip needs,
+/// and nothing else reads it.
+async function loadWindows() {
+  try {
+    renderWindows(await invoke("notch_windows"));
+  } catch (e) {
+    renderWindows({ available: false, error: String(e?.message ?? e) });
+  }
+}
+
+// --- git tab -------------------------------------------------------------
+
+function renderGitTab(g) {
+  const pushes = el("gt-pushes");
+
+  if (!g?.available) {
+    fill(
+      pushes,
+      empty(
+        !g
+          ? "The git module is off — run: notch module git on"
+          : g.pending
+            ? "loading…"
+            : "gh unavailable",
+      ),
+    );
+    return;
+  }
+
+  setText("gt-login", g.login ? `@${g.login}` : "");
+  setText("gt-today", g.today ?? 0);
+  setText("gt-week", g.week ?? 0);
+  setText("gt-30", g.last30d ?? 0);
+  setText("gt-year", g.year ?? 0);
+  setText("gt-prs", `${(g.open_prs ?? []).length} open PRs`);
+
+  fill(
+    el("gt-grid"),
+    (g.heatmap ?? []).map((d) => heatCell("grid__cell", d)),
+  );
+
+  fillRows(
+    pushes,
+    (g.recent_pushes ?? []).slice(0, PUSH_ROWS),
+    (p) => {
+      const row = node("div", "push");
+      row.append(node("span", "push__repo", p.repo));
+      row.append(node("span", "push__branch", `⎇ ${p.branch || "—"}`));
+      row.append(node("span", "push__when", since(p.at)));
+      return row;
+    },
+    "No pushes found.",
+  );
+}
+
+// --- data ----------------------------------------------------------------
 
 function render(data) {
   lastPayload = data;
   setPinned(data.pinned);
   renderPill(data.pill ?? {});
-  renderDayCards(data.day);
-  renderDayFacts(data.day);
-}
 
-// --- data ----------------------------------------------------------------
+  renderUsageCard(data.usage);
+  renderDayCard(data.day);
+  renderGitCard(data.git);
+  renderSessionsCard(data.sessions);
+
+  renderTodos(data.todos);
+  renderUsageTab(data.usage);
+  renderSessionsTab(data.sessions);
+  renderGitTab(data.git);
+
+  if (activeTab() === "usage") loadWindows();
+}
 
 async function load() {
   try {
@@ -204,7 +569,7 @@ async function load() {
     // A HUD with no console has to say when it breaks, rather than sitting on
     // stale placeholders and looking merely empty.
     if (!lastPayload) {
-      fill(el("day-facts"), [node("p", "empty", String(err?.message ?? err))]);
+      fill(el("agent-list"), empty(String(err?.message ?? err)));
     }
   }
 }
@@ -219,7 +584,12 @@ function restartPolling(ms) {
 let hotTab = null;
 let hotSince = 0;
 
+function activeTab() {
+  return document.querySelector(".tab--on")?.dataset.tab ?? "overview";
+}
+
 function setTab(name) {
+  const changed = activeTab() !== name;
   document.querySelectorAll(".tab").forEach((t) => {
     const on = t.dataset.tab === name;
     t.classList.toggle("tab--on", on);
@@ -228,6 +598,8 @@ function setTab(name) {
   document.querySelectorAll(".view").forEach((v) => {
     v.classList.toggle("view--on", v.id === `view-${name}`);
   });
+  // The window history is only read for the tab that shows it.
+  if (changed && name === "usage") loadWindows();
 }
 
 /// Rust reports where the cursor is, in this page's own pixels, because WebKit's
@@ -271,8 +643,8 @@ window.notchHud = {
 };
 
 // Data first, and never gated on IPC for the geometry: the numbers are the whole
-// point, so they must not be lost to a command that hangs. Geometry and the
-// initial open state are a best-effort follow-up.
+// point, so they must not be lost to a command that hangs. Geometry and the initial
+// open state are a best-effort follow-up.
 load();
 restartPolling(POLL_COLLAPSED_MS);
 applyMetrics()

@@ -25,9 +25,10 @@ pub const LABEL: &str = "notch";
 const COLLAPSED_SIDE: f64 = 134.0;
 /// Collapsed width floor, for displays with no notch to flank.
 const COLLAPSED_MIN_W: f64 = 268.0;
-const EXPANDED_W: f64 = 520.0;
-/// Tab bar plus the tallest of the two views.
-const EXPANDED_H: f64 = 268.0;
+const EXPANDED_W: f64 = 680.0;
+/// Tab bar, the overview cards, and the five session rows `notch.js` shows there
+/// (`SESSION_ROWS`) plus the "+N older" line — change both together.
+const EXPANDED_H: f64 = 462.0;
 /// Menu-bar height to assume when macOS won't tell us (no notch, or non-macOS).
 const MENUBAR_FALLBACK: f64 = 24.0;
 /// Collapsed height floor, so the sliver stays hoverable on short menu bars.
