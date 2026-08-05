@@ -1,0 +1,30 @@
+[package]
+name = "notch-app"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "notch-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+notch-core = { path = "../notch-core" }
+tauri = { version = "2", features = ["macos-private-api"] }
+serde_json.workspace = true
+
+# The panel: raise the window above the menu bar, and read the notch's size.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+  "NSScreen",
+  "NSWindow",
+  "NSResponder",
+  "NSView",
+  "NSGraphics",
+] }
+# Cursor sampling: CoreGraphics is thread-safe, unlike NSEvent::mouseLocation.
+objc2-core-graphics = { version = "0.3", features = ["CGEvent", "CGEventTypes"] }

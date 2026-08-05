@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The notch panel, which loads only its own embedded assets.",
+  "local": true,
+  "windows": ["notch"],
+  "permissions": ["core:default"]
+}

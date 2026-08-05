@@ -1,0 +1,8 @@
+# rust
+/target
+
+# tauri generated
+crates/notch-app/gen
+
+# macOS
+.DS_Store
