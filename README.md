@@ -32,7 +32,50 @@ cargo install --path crates/notch-app   # the panel
 cargo install --path crates/notch       # the CLI that configures it
 ```
 
-Then run it:
+### Check it installed
+
+```bash
+notch --version
+```
+
+```
+notch 0.1.0
+```
+
+If that says `command not found`, the install didn't land on your `PATH` —
+`cargo install` puts binaries in `~/.cargo/bin`, so make sure that's on it.
+
+Then `notch` on its own prints what's switched on, and every command there is:
+
+```bash
+notch
+```
+
+```
+notch HUD  on
+
+  day       on   Clock, date, day progress, battery
+  usage     on   Claude session + weekly limits
+  git       on   GitHub contributions
+  sessions  on   Live Claude Code sessions
+  todos     on   To-do briefing
+
+  opens after 600ms of hover
+
+notch on | off | toggle
+notch delay <ms>
+notch module <name> [on|off|toggle]
+notch pin [on|off|toggle]
+notch todos [path|schema|clear]
+notch attention [show|clear]
+notch doctor
+
+Click the sliver to pin the panel open, or use `notch pin`.
+```
+
+On a fresh install only `day` is on — see [Use it](#use-it) for turning the rest on.
+
+### Start the panel
 
 ```bash
 notch-app
@@ -40,6 +83,13 @@ notch-app
 
 The panel appears immediately. There is no dock icon and no menu-bar icon — the
 panel is the whole interface.
+
+It stays in the foreground of that terminal, so `Ctrl-C` stops it. To have it always
+running instead, install the LaunchAgent below rather than starting it by hand.
+
+> `notch-app` takes no arguments. It is the panel, not a CLI — `notch-app --version`
+> will just launch it. Use `notch --version` for the version, and `notch` for
+> everything else.
 
 ### Keep it running
 
