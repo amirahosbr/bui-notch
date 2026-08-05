@@ -1,0 +1,29 @@
+{
+  "extraKnownMarketplaces": {
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
+    },
+    "workaholic": {
+      "source": {
+        "source": "github",
+        "repo": "qmu/workaholic"
+      }
+    }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/scripts/check-code-quality.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
