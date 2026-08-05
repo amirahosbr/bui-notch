@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{json, Value};
 
-use crate::{config, day, git, sessions, todos, usage};
+use crate::{attention, config, day, git, sessions, todos, usage};
 
 /// The live pin, mirroring `config.pinned`.
 ///
@@ -84,6 +84,9 @@ fn assemble(cfg: &config::NotchConfig, m: &Modules, pinned: bool) -> Value {
         "git": m.git,
         "sessions": m.sessions,
         "todos": m.todos,
+        // Not a module, so it has no switch: the whole value of an interrupt is
+        // that it arrives without being asked for.
+        "attention": attention::current_with_prompt(),
         "pinned": pinned,
     })
 }
@@ -162,7 +165,15 @@ mod tests {
         let v = assemble(&NotchConfig::default(), &Modules::default(), false);
         let obj = v.as_object().unwrap();
         for key in [
-            "config", "pill", "day", "usage", "git", "sessions", "todos", "pinned",
+            "config",
+            "pill",
+            "day",
+            "usage",
+            "git",
+            "sessions",
+            "todos",
+            "attention",
+            "pinned",
         ] {
             assert!(obj.contains_key(key), "payload is missing {key}");
         }
@@ -250,6 +261,25 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(pill(&m)["agents"], json!(0));
+    }
+
+    #[test]
+    fn attention_is_not_gated_by_any_module_switch() {
+        // Every module off, and the interrupt key is still there — it is the one
+        // thing a user cannot switch away.
+        let all_off = NotchConfig {
+            day: false,
+            usage: false,
+            git: false,
+            sessions: false,
+            todos: false,
+            ..NotchConfig::default()
+        };
+        let v = assemble(&all_off, &Modules::default(), false);
+        assert!(
+            v.as_object().unwrap().contains_key("attention"),
+            "an interrupt has no off switch"
+        );
     }
 
     #[test]

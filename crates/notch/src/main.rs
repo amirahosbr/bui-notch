@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use notch_core::attention as notch_attention;
 use notch_core::config::{self, NotchConfig, MAX_OPEN_DELAY_MS, MODULES};
 use notch_core::doctor::{self, State};
 use notch_core::todos as notch_todos;
@@ -57,6 +58,15 @@ enum Action {
         #[command(subcommand)]
         action: Option<TodosAction>,
     },
+    /// Raise "an agent needs you", reading a hook payload on stdin.
+    ///
+    /// Wired to Claude Code's Notification hook by
+    /// ./scripts/install-claude-hook.sh — it fires exactly when an agent wants
+    /// you, which a transcript cannot tell us apart from a tool merely running.
+    Attention {
+        #[command(subcommand)]
+        action: Option<AttentionAction>,
+    },
     /// Check that everything the HUD depends on is actually wired up.
     ///
     /// Start here when the panel is showing less than you expected: each module
@@ -66,6 +76,14 @@ enum Action {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AttentionAction {
+    /// Print what is waiting, if anything.
+    Show,
+    /// Forget the current request.
+    Clear,
 }
 
 #[derive(Subcommand)]
@@ -97,7 +115,41 @@ fn run(action: Option<&Action>, cfg: &NotchConfig) -> Result<()> {
         Some(Action::Module { name, state }) => set_module(cfg, name, state),
         Some(Action::Pin { state }) => set_pin(cfg, state),
         Some(Action::Todos { action }) => todos(action.as_ref()),
+        Some(Action::Attention { action }) => attention(action.as_ref()),
         Some(Action::Doctor { json }) => run_doctor(*json),
+    }
+}
+
+/// Raises, shows, or clears "an agent needs you".
+///
+/// With no subcommand it reads a Notification hook payload on stdin. A payload it
+/// cannot parse still raises a bare request: the hook firing at all means something
+/// wants you, and dropping it because a field moved would be the wrong failure.
+fn attention(action: Option<&AttentionAction>) -> Result<()> {
+    match action {
+        Some(AttentionAction::Show) => {
+            match notch_attention::current_with_prompt() {
+                Some(v) => println!("{}", serde_json::to_string_pretty(&v)?),
+                None => println!("nothing waiting"),
+            }
+            Ok(())
+        }
+        Some(AttentionAction::Clear) => {
+            notch_attention::clear()?;
+            println!("cleared");
+            Ok(())
+        }
+        None => {
+            let mut raw = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut raw)?;
+            let payload = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+            let a = notch_attention::from_hook(&payload, chrono::Utc::now());
+            notch_attention::raise(&a)?;
+            // The hook runs on every notification, so keep it quiet; the panel is
+            // where this is meant to be seen.
+            eprintln!("notch: attention raised — {}", a.message);
+            Ok(())
+        }
     }
 }
 
@@ -274,6 +326,7 @@ fn print_status(cfg: &NotchConfig) {
     println!("notch module <name> [on|off|toggle]");
     println!("notch pin [on|off|toggle]");
     println!("notch todos [path|schema|clear]");
+    println!("notch attention [show|clear]");
     println!("notch doctor");
     println!();
     println!("Click the sliver to pin the panel open, or use `notch pin`.");
@@ -364,6 +417,9 @@ mod tests {
             vec!["notch", "todos", "path"],
             vec!["notch", "todos", "schema"],
             vec!["notch", "todos", "clear"],
+            vec!["notch", "attention"],
+            vec!["notch", "attention", "show"],
+            vec!["notch", "attention", "clear"],
             vec!["notch", "doctor"],
             vec!["notch", "doctor", "--json"],
         ] {
