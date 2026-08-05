@@ -89,6 +89,42 @@ file. Each fails quietly and separately, so a blank card looks the same whicheve
 one it was. `doctor` asks all of them at once, skips the checks belonging to
 switched-off modules, and names the command that fixes each failure.
 
+## When an agent needs you
+
+The panel is otherwise passive: it shows what is happening only once you go and
+look. The exception is the **attention interrupt** — when a Claude Code session
+stops and waits for you, the panel opens by itself, says which session and what it
+is asking, holds about twelve seconds, and closes again.
+
+```bash
+cargo install --path crates/notch
+./scripts/install-claude-hook.sh   # wires Claude Code's Notification hook
+```
+
+Restart any running Claude Code session afterwards. Check it with `notch doctor`,
+or `notch attention show` while something is actually waiting.
+
+This uses Claude Code's `Notification` hook rather than watching transcripts,
+because a transcript cannot tell the difference: a tool call awaiting *permission*
+and one that is simply *running* are the same thing on disk — an assistant
+`tool_use` with no result yet. Guessing from elapsed time would pop the panel open
+every time a build took half a minute.
+
+Three properties it is built to have:
+
+* **It never takes focus.** The panel is never the key window, and opening it for an
+  interrupt does not change that, so whatever you were typing into keeps the
+  keyboard.
+* **It closes itself.** A panel that opens unprompted and then stays open is worse
+  than one that never opens.
+* **It has no off switch.** Every other module can be turned off; this cannot,
+  because an interrupt you have to remember to enable is not an interrupt.
+
+The banner is read-only. bui could answer the agent by typing the chosen digit into
+its terminal pane; that needs tmux or zellij plumbing and a pane registry, and is
+deliberately not here. You get told what is being asked, and you answer in the
+terminal yourself.
+
 ## The to-do briefing
 
 The `todos` module renders a JSON file and nothing more. It holds no credentials and

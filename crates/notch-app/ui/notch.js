@@ -296,12 +296,64 @@ function renderGitCard(g) {
   );
 }
 
+// --- attention ------------------------------------------------------------
+
+/// Session id of whoever is waiting, so its row can be marked.
+let attentionSession = null;
+
+/// An agent waiting on you. Rust opens the panel for this; the banner says which
+/// one and why, because "something needs you" on its own is not actionable.
+function renderAttention(a) {
+  const box = el("attention");
+  box.hidden = !a;
+  attentionSession = a?.session_id ?? null;
+  if (!a) return;
+
+  setText("att-msg", a.message ?? "An agent needs you");
+  setText(
+    "att-where",
+    [a.project, a.age_secs != null ? `waiting ${ago(a.age_secs)}` : ""].filter(Boolean).join(" · "),
+  );
+  renderAsk(a.prompt);
+}
+
+/// What it is actually asking. A question shows the question and the agent's own
+/// option labels; anything else is a permission prompt for one tool.
+function renderAsk(p) {
+  const ask = el("att-ask");
+  const options = el("att-options");
+  ask.hidden = !p;
+  options.hidden = true;
+  if (!p) return;
+
+  if (p.kind === "question") {
+    setText("att-kind", p.header || "asks");
+    setText("att-detail", p.question);
+    const labels = p.options ?? [];
+    options.hidden = labels.length === 0;
+    fill(
+      options,
+      labels.map((l, i) => node("span", "alert__option", `${i + 1} ${l}`)),
+    );
+    return;
+  }
+  setText("att-kind", "permission");
+  setText("att-detail", [p.tool, p.detail].filter(Boolean).join(" · "));
+}
+
 // --- sessions -------------------------------------------------------------
 
 /// One session row, shared by the Overview and the Sessions tab.
 function sessionRow(r) {
-  const row = node("div", "sess");
-  const state = r.status === "active" ? "live" : r.status === "tool" ? "tool" : "";
+  const waiting = attentionSession != null && r.id === attentionSession;
+  const row = node("div", `sess${waiting ? " sess--waiting" : ""}`);
+  const state = waiting
+    ? "tool"
+    : r.status === "active"
+      ? "live"
+      : r.status === "tool"
+        ? "tool"
+        : "";
   row.append(node("span", `dot${state ? ` dot--${state}` : ""}`));
 
   const head = node("div", "sess__head");
@@ -339,13 +391,21 @@ function renderSessionsCard(s) {
   }
 
   setText("a-count", s.active ? `· ${s.active} active` : "");
-  const all = s.list ?? [];
+  // Newest first, except a waiting agent, which is always worth a row.
+  const all = ordered(s.list ?? []);
   const rows = all.slice(0, SESSION_ROWS);
   const hidden = all.length - rows.length;
   more.hidden = hidden <= 0;
   more.textContent = hidden > 0 ? `+${hidden} older ${hidden === 1 ? "session" : "sessions"}` : "";
 
   fillRows(list, rows, sessionRow, NO_SESSIONS);
+}
+
+/// The list, with a waiting agent lifted to the top so the interrupt's subject is
+/// never the one row that got cut.
+function ordered(list) {
+  if (attentionSession == null) return list;
+  return [...list].sort((a, b) => (b.id === attentionSession) - (a.id === attentionSession));
 }
 
 /// The Sessions tab: everything, scrollable, no cap.
@@ -361,7 +421,7 @@ function renderSessionsTab(s) {
     fill(list, empty(s.error ?? "unavailable"));
     return;
   }
-  const all = s.list ?? [];
+  const all = ordered(s.list ?? []);
   setText("s-count", all.length ? `· ${all.length}` : "");
   fillRows(list, all, sessionRow, NO_SESSIONS);
 }
@@ -547,6 +607,8 @@ function renderGitTab(g) {
 function render(data) {
   lastPayload = data;
   setPinned(data.pinned);
+  // Before the session lists, which mark the waiting agent's row.
+  renderAttention(data.attention);
   renderPill(data.pill ?? {});
 
   renderUsageCard(data.usage);
@@ -640,6 +702,11 @@ window.notchHud = {
   setPinned,
   refresh: load,
   cursor,
+  // Rust calls this when it opens the panel because an agent is waiting.
+  attention: () => {
+    setTab("sessions");
+    load();
+  },
 };
 
 // Data first, and never gated on IPC for the geometry: the numbers are the whole
