@@ -960,7 +960,14 @@
             <span class="strip__stat" id="pill-commits"></span>
             <span class="dot" id="pill-dot" hidden></span>
             <span class="strip__stat" id="pill-agents"></span>
-            <span class="strip__stat" id="pill-batt"></span>
+            <!-- When the session limit resets. The battery used to sit here, but
+                 macOS already shows one — this is a number it has no equivalent
+                 for, and it pairs with the session % on the other side. -->
+            <span
+              class="strip__stat"
+              id="pill-resets"
+              title="Until the Claude session resets"
+            ></span>
           </div>
         </div>
       </div>

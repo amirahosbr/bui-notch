@@ -100,16 +100,12 @@ fn pill(m: &Modules) -> Value {
     let git = available(&m.git);
     let todos = available(&m.todos);
 
-    // No clock here on purpose: macOS already puts one in the menu bar a few
-    // hundred points away, so the strip would only be printing it twice. The Day
-    // card inside the panel still shows it.
+    // No clock or battery here on purpose: macOS already shows both in the menu bar
+    // a few hundred points away, so the strip would only be printing them twice —
+    // and a bare percentage next to another bare percentage invites the question of
+    // which is which. The Day card inside the panel has both.
     json!({
         "day_pct": m.day.as_ref().and_then(|d| d["progress"].as_f64()),
-        "battery_pct": m.day.as_ref().and_then(|d| d["battery"]["percent"].as_u64()),
-        "charging": m.day
-            .as_ref()
-            .and_then(|d| d["battery"]["charging"].as_bool())
-            .unwrap_or(false),
         "session_pct": usage.as_ref().and_then(|u| u["session"]["percent"].as_f64()),
         "resets_in": usage
             .as_ref()
@@ -197,7 +193,6 @@ mod tests {
         };
         let p = pill(&m);
         assert_eq!(p["day_pct"], json!(61.1));
-        assert_eq!(p["battery_pct"], json!(95));
         assert_eq!(p["session_pct"], json!(42.0));
         assert_eq!(p["resets_in"], json!("3h52m"));
         assert_eq!(p["commits"], json!(7));
@@ -209,17 +204,9 @@ mod tests {
     fn the_pill_tolerates_every_module_being_absent() {
         let p = pill(&Modules::default());
         assert_eq!(p["resets_in"], json!(""), "an empty string, not null");
-        for key in [
-            "day_pct",
-            "battery_pct",
-            "session_pct",
-            "commits",
-            "agents",
-            "todos",
-        ] {
+        for key in ["day_pct", "session_pct", "commits", "agents", "todos"] {
             assert!(p[key].is_null(), "{key} should be null");
         }
-        assert_eq!(p["charging"], json!(false));
     }
 
     #[test]
@@ -240,9 +227,10 @@ mod tests {
     }
 
     #[test]
-    fn the_pill_carries_no_clock() {
-        // macOS already shows one in the menu bar; the strip must not print it
-        // twice, so the reduction should not offer it at all.
+    fn the_pill_carries_neither_clock_nor_battery() {
+        // macOS shows both in the menu bar already. The strip must not print them
+        // twice, so the reduction should not offer them at all — and two bare
+        // percentages side by side cannot be told apart.
         let m = Modules {
             day: Some(a_day()),
             ..Default::default()
@@ -250,6 +238,8 @@ mod tests {
         let p = pill(&m);
         assert!(p["clock"].is_null(), "the strip has no clock");
         assert!(p["meridiem"].is_null());
+        assert!(p["battery_pct"].is_null(), "the strip has no battery");
+        assert!(p["charging"].is_null());
         assert_eq!(p["day_pct"], json!(61.1), "the meter still gets the day");
     }
 

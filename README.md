@@ -4,13 +4,15 @@ A Dynamic Island for the Mac notch.
 
 A black panel hangs from the top of your screen and merges with the physical
 notch. Collapsed it fills the menu-bar row either side of the notch with a few
-glanceable readings — Claude session usage, commits today, live agents, battery.
-Rest the cursor on it and it unfurls into a small panel; move away and it shrinks
-back. Click it to hold it open, and a green mark appears to say it's held.
+glanceable readings — Claude session usage, to-dos due today, commits today, live
+agents, and how long until the session limit resets. Rest the cursor on it and it
+unfurls into a small panel; move away and it shrinks back. Click it to hold it
+open, and a green mark appears to say it's held.
 
-It deliberately shows no clock: macOS already puts one in the menu bar a few
-hundred points to the right. The Day card inside the panel has it, along with the
-date and how much of the day is gone.
+It deliberately shows **no clock and no battery**: macOS already puts both in the
+menu bar a few hundred points to the right, and two bare percentages side by side
+can't be told apart. The Day card inside the panel has both, along with the date
+and how much of the day is gone.
 
 It draws *over* the menu bar, follows you across Spaces, and lets clicks through
 everywhere except the sliver itself, so it never gets in the way of the menu bar

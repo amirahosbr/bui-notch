@@ -203,7 +203,10 @@ function renderPill(p) {
   el("pill-dot").className = `dot${agents ? " dot--live" : ""}`;
   setText("pill-agents", agents ? String(agents) : "");
 
-  setText("pill-batt", p.battery_pct == null ? "" : `${p.battery_pct}%${p.charging ? " ⚡" : ""}`);
+  // "↻ 3h18m" — how long until the session limit resets. No battery here: macOS
+  // shows one already, and a bare "100%" beside a bare "22%" invites exactly the
+  // question of which is which.
+  setText("pill-resets", p.resets_in ? `↻ ${p.resets_in}` : "");
 }
 
 // --- overview: usage card -------------------------------------------------
