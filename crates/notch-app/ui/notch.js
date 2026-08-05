@@ -204,10 +204,14 @@ function renderPill(p) {
   setText("pill-todos", p.todos ? `☑ ${p.todos}` : "");
   setText("pill-commits", p.commits == null ? "" : `⎇ ${p.commits}`);
 
+  // A waiting agent outranks a running one: the dot goes amber and stays for as
+  // long as the request is live, so the sliver still says so after the panel has
+  // closed itself.
   const agents = p.agents ?? 0;
-  el("pill-dot").hidden = !agents;
-  el("pill-dot").className = `dot${agents ? " dot--live" : ""}`;
-  setText("pill-agents", agents ? String(agents) : "");
+  el("pill-dot").hidden = !agents && !p.waiting;
+  el("pill-dot").className = `dot ${p.waiting ? "dot--tool" : agents ? "dot--live" : ""}`.trim();
+  el("pill-dot").title = p.waiting ? "An agent is waiting on you" : "Live coding sessions";
+  setText("pill-agents", p.waiting ? "!" : agents ? String(agents) : "");
 }
 
 // --- overview: usage card -------------------------------------------------
