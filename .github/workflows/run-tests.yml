@@ -1,40 +1,78 @@
 name: Run Tests
+
+# Runs on every pull request, not only once review is requested. The template's
+# `ci-testing` label dance existed to save Actions minutes, but it meant a PR could
+# sit for hours never having been built — which is how a workflow whose only step
+# was `echo "Build and run tests here"` went unnoticed.
 on:
   pull_request:
-    types: [review_requested, synchronize, labeled]
   push:
     branches:
       - "main"
+
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
+
+concurrency:
+  # A new push supersedes the run already in flight for the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  run-tests:
-    if: |
-      (github.event.action == 'review_requested' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'ci-testing') ||
-      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'ci-testing'))) ||
-      (github.event_name == 'push')
-
+  # Most of the suite is platform-independent, so it runs on the cheap runner.
+  core:
+    name: notch-core + notch (linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Install the pinned toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/github-script@v9
-        name: Set 'ci-testing' label
-        if: github.event.action == 'review_requested'
+          key: core
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy -p notch-core -p notch --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test -p notch-core -p notch
+
+  # notch-app links against AppKit and CoreGraphics, so it can only build here.
+  # macOS minutes bill at ten times the Linux rate — if that ever bites, this is
+  # the job to drop to `push` only.
+  panel:
+    name: notch-app (macos)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the pinned toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
         with:
-          script: |
-            github.rest.issues.addLabels({
-              issue_number: context.payload.pull_request.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ["ci-testing"]
-            })
-      - name: Build and run tests
-        run: |
-          echo "Build and run tests here"
+          key: panel
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+  ui:
+    name: panel markup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Prettier
+        run: npx --yes prettier@3 --check "crates/notch-app/ui/*.{html,js}"
