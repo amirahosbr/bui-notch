@@ -1,0 +1,14 @@
+[package]
+name = "notch"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "notch"
+path = "src/main.rs"
+
+[dependencies]
+notch-core = { path = "../notch-core" }
+anyhow.workspace = true
+clap = { version = "4", features = ["derive"] }
