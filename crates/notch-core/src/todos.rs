@@ -1,9 +1,13 @@
 //! The `todos` module: a to-do briefing written by something else.
 //!
-//! This app does not talk to Slack, or to any tracker, and does not decide what
-//! counts as an action item. A producer writes a briefing to [`path`] and this
+//! This app does not talk to Slack, Gmail, or any tracker, and does not decide
+//! what counts as an action item. A producer writes a briefing to [`path`] and this
 //! renders it. That keeps credentials and judgement out of a HUD, and means the
 //! same tab works for any producer that can write a file.
+//!
+//! The producer shipped with this repo is `/todo-brief`, a Claude Code command that
+//! reads Slack and Gmail through connectors the HUD never sees. [`schema`] is what
+//! it is told to copy.
 //!
 //! The schema is deliberately forgiving, because its author may well be a language
 //! model: every item may be a bare string or an object, and every section may be
@@ -12,7 +16,7 @@
 //! ```json
 //! {
 //!   "generated_at": "2026-08-04T01:30:00Z",
-//!   "source": "slack",
+//!   "source": "slack+gmail",
 //!   "today":       [{ "text": "Reply to the tariff thread", "channel": "#eon", "who": "Kenji" }],
 //!   "week":        ["Draft the Q3 plan"],
 //!   "in_progress": [],
@@ -21,7 +25,7 @@
 //! ```
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -127,8 +131,13 @@ pub fn path() -> PathBuf {
 /// Reads the briefing. `Ok(None)` means none has been written yet, which is a
 /// normal state and not an error.
 pub fn load() -> Result<Option<Briefing>> {
-    let p = path();
-    let raw = match fs::read_to_string(&p) {
+    load_at(&path())
+}
+
+/// [`load`] from an explicit file, so the reading can be tested without touching
+/// the briefing on this machine.
+fn load_at(p: &Path) -> Result<Option<Briefing>> {
+    let raw = match fs::read_to_string(p) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e).with_context(|| format!("reading {}", p.display())),
@@ -139,6 +148,43 @@ pub fn load() -> Result<Option<Briefing>> {
     Ok(Some(
         serde_json::from_str(&raw).with_context(|| format!("parsing {}", p.display()))?,
     ))
+}
+
+/// Removes the briefing. Missing already is success, not an error.
+pub fn clear() -> Result<()> {
+    clear_at(&path())
+}
+
+/// [`clear`] on an explicit file. Takes the path rather than reaching for it so a
+/// test can never delete the real briefing.
+fn clear_at(p: &Path) -> Result<()> {
+    match fs::remove_file(p) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("removing {}", p.display())),
+    }
+}
+
+/// The shape a producer should write, as an example document.
+///
+/// Handed out rather than described in prose so a producer can be pointed at
+/// something it can copy — and so this file stays the one definition of the shape.
+pub fn schema() -> Value {
+    json!({
+        "generated_at": "2026-08-05T04:00:00Z",
+        "source": "slack+gmail",
+        "today": [
+            {
+                "text": "Reply to the tariff thread",
+                "channel": "#eon",
+                "who": "Kenji",
+            },
+            "a bare string is also accepted",
+        ],
+        "week": [{ "text": "Draft the Q3 plan", "channel": "inbox", "who": "Sato" }],
+        "in_progress": [],
+        "done": [],
+    })
 }
 
 /// Everything the to-do module renders.
@@ -228,6 +274,68 @@ mod tests {
             serde_json::from_str(r#"{"this_week": ["a"], "in-progress": ["b"]}"#).unwrap();
         assert_eq!(b.week.len(), 1);
         assert_eq!(b.in_progress.len(), 1);
+    }
+
+    #[test]
+    fn the_schema_we_hand_out_parses_back() {
+        // A producer is told to copy this shape, so it has to survive the reader.
+        // If they ever drift, every briefing written from the schema breaks.
+        let b: Briefing = serde_json::from_value(schema()).expect("schema must parse");
+        assert_eq!(b.today.len(), 2, "the object and the bare string");
+        assert_eq!(b.today[0].text, "Reply to the tariff thread");
+        assert_eq!(b.today[0].channel.as_deref(), Some("#eon"));
+        assert_eq!(b.today[1].text, "a bare string is also accepted");
+        assert_eq!(b.week.len(), 1);
+        assert!(b.generated_at.is_some(), "the timestamp shape is valid");
+    }
+
+    #[test]
+    fn the_schema_names_both_sources() {
+        // The briefing is fed from Slack and Gmail, and `source` is what says so.
+        assert_eq!(schema()["source"], json!("slack+gmail"));
+    }
+
+    #[test]
+    fn a_briefing_round_trips_through_a_file() {
+        let p = std::env::temp_dir().join("notch-todos-roundtrip.json");
+        fs::write(&p, serde_json::to_string(&schema()).unwrap()).unwrap();
+        let b = load_at(&p).unwrap().expect("a written briefing loads");
+        assert_eq!(b.today.len(), 2);
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn clearing_is_safe_to_repeat() {
+        let p = std::env::temp_dir().join("notch-todos-clear.json");
+        fs::write(&p, "{}").unwrap();
+        assert!(clear_at(&p).is_ok());
+        assert!(clear_at(&p).is_ok(), "already gone is still success");
+        assert!(load_at(&p).unwrap().is_none());
+    }
+
+    #[test]
+    fn an_absent_file_and_an_empty_one_both_read_as_no_briefing() {
+        let missing = std::env::temp_dir().join("notch-todos-nope.json");
+        let _ = fs::remove_file(&missing);
+        assert!(load_at(&missing).unwrap().is_none());
+
+        let blank = std::env::temp_dir().join("notch-todos-blank.json");
+        fs::write(&blank, "   \n").unwrap();
+        assert!(
+            load_at(&blank).unwrap().is_none(),
+            "whitespace is not a briefing"
+        );
+        let _ = fs::remove_file(&blank);
+    }
+
+    #[test]
+    fn a_corrupt_briefing_is_an_error_naming_the_file() {
+        // The tab should say the file is broken, not silently show nothing.
+        let p = std::env::temp_dir().join("notch-todos-corrupt.json");
+        fs::write(&p, "{not json").unwrap();
+        let err = load_at(&p).unwrap_err();
+        assert!(err.to_string().contains("notch-todos-corrupt"), "{err}");
+        let _ = fs::remove_file(&p);
     }
 
     #[test]
