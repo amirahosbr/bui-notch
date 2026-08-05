@@ -82,6 +82,37 @@ file. Each fails quietly and separately, so a blank card looks the same whicheve
 one it was. `doctor` asks all of them at once, skips the checks belonging to
 switched-off modules, and names the command that fixes each failure.
 
+## What leaves your machine
+
+Three of the five modules read nothing but your own computer. Two make network
+calls, and it's worth knowing which:
+
+| Module | Where its data comes from |
+| --- | --- |
+| `day` | The system clock, and `pmset` for the battery. Local. |
+| `sessions` | The transcript files in `~/.claude/projects`. Local. |
+| `todos` | A JSON file another process writes. Local — nothing here talks to Slack or any tracker. |
+| `usage` | **A request to `api.anthropic.com`.** |
+| `git` | **`gh api` calls to GitHub.** |
+
+**`usage`** sends a throwaway 1-token request to `/v1/messages` and reads the
+rate-limit *response headers* — that is where the percentages and reset times come
+from, so they are Anthropic's numbers rather than a guess. Your token is only read
+locally (the macOS keychain, then `~/.claude/.credentials.json`) and is never
+logged or included in an error message. Each reading is appended to
+`usage-history.jsonl` beside your settings, which is what the reset-window list is
+built from; nothing uploads it.
+
+Note that this probe **spends a little of the quota it is measuring**. It's cached
+for 60 seconds, so at most one request a minute while the module is on.
+
+**`git`** shells out to `gh`, which reads your contribution calendar, your recent
+events and your open PRs from GitHub. Nothing is read from your local repositories
+— the calendar is used precisely because it counts commits on branches that were
+never merged, which neither a local scan nor GitHub's commit search would show.
+
+Neither module runs at all while it is switched off, and both are off by default.
+
 ## Configure it
 
 ```bash
