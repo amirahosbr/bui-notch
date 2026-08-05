@@ -51,6 +51,7 @@ pub fn run() -> Vec<Check> {
         gh_cli(cfg.git),
         transcripts(cfg.sessions),
         briefing(cfg.todos),
+        claude_hook(),
     ]
 }
 
@@ -200,6 +201,29 @@ fn transcripts(on: bool) -> Check {
     )
 }
 
+/// Whether Claude Code will tell us when an agent is waiting.
+///
+/// Not gated on a module: the attention interrupt has no switch, so this is always
+/// worth reporting.
+fn claude_hook() -> Check {
+    let settings = dirs::home_dir().map(|h| h.join(".claude").join("settings.json"));
+    let wired = settings
+        .as_ref()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .is_some_and(|s| s.contains("notch attention"));
+    check(
+        "attention",
+        "Claude Code hook",
+        if wired { State::Ok } else { State::Fail },
+        if wired {
+            "the Notification hook will open the panel".into()
+        } else {
+            "no Notification hook, so a waiting agent cannot reach the panel".into()
+        },
+        (!wired).then_some("./scripts/install-claude-hook.sh"),
+    )
+}
+
 fn briefing(on: bool) -> Check {
     let path = crate::todos::path();
     let exists = path.exists();
@@ -277,7 +301,7 @@ mod tests {
     #[test]
     fn run_reports_on_every_module_plus_the_panel() {
         let checks = run();
-        for module in ["panel", "usage", "git", "sessions", "todos"] {
+        for module in ["panel", "usage", "git", "sessions", "todos", "attention"] {
             assert!(
                 checks.iter().any(|c| c.module == module),
                 "nothing checked for {module}"

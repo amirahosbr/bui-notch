@@ -306,6 +306,10 @@ const NEAR_TOP_PT: f64 = 140.0;
 const COLLAPSE_GRACE: Duration = Duration::from_millis(260);
 /// Must outlast the closing transition in notch.html.
 const CLOSE_ANIM: Duration = Duration::from_millis(360);
+/// How long an attention-triggered panel stays open on its own. Long enough to read
+/// which agent is waiting and what it asked, short enough not to sit in front of
+/// your work.
+const ATTENTION_HOLD: Duration = Duration::from_secs(12);
 
 /// How long to wait before looking at the cursor again.
 ///
@@ -405,6 +409,10 @@ pub fn spawn_hover_watcher(app: AppHandle) {
         let mut dwell = open_dwell();
         // Mirrors the window's ignore_cursor_events, so it's only set on a change.
         let mut accepting_clicks = false;
+        // Set while the panel is open because an agent asked, not because of hover.
+        let mut held_until: Option<Instant> = None;
+        // Last seen mtime of the attention file, so it is only parsed on a change.
+        let mut attention_seen: Option<std::time::SystemTime> = None;
 
         loop {
             thread::sleep(poll_interval(expanded));
@@ -414,6 +422,7 @@ pub fn spawn_hover_watcher(app: AppHandle) {
                 expanded = false;
                 outside_since = None;
                 inside_since = None;
+                held_until = None;
                 continue;
             }
 
@@ -424,6 +433,30 @@ pub fn spawn_hover_watcher(app: AppHandle) {
                 let handle = app.clone();
                 let _ = app.run_on_main_thread(move || expand(&handle));
                 trace(|| "open (pinned)".to_string());
+            }
+
+            // An agent asking for you outranks hover: open unprompted, and hold it
+            // open long enough to be read. Gated on the file's mtime, so the common
+            // case — nothing waiting — costs one stat rather than a JSON parse.
+            let (moved, stamp) = notch_core::attention::changed_since(attention_seen);
+            if moved {
+                attention_seen = stamp;
+                if let Some(a) = notch_core::attention::take_unshown() {
+                    trace(|| format!("attention: {}", a.message));
+                    held_until = Some(Instant::now() + ATTENTION_HOLD);
+                    if !expanded {
+                        expanded = true;
+                        let handle = app.clone();
+                        let _ = app.run_on_main_thread(move || expand(&handle));
+                    }
+                    // Land on the session list, which is where the waiting agent is.
+                    let handle = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        if let Some(win) = handle.get_webview_window(LABEL) {
+                            let _ = win.eval("window.notchHud?.attention()");
+                        }
+                    });
+                }
             }
 
             // Collapsed, the window normally lets the cursor through so it can't
@@ -444,6 +477,8 @@ pub fn spawn_hover_watcher(app: AppHandle) {
 
             if over {
                 outside_since = None;
+                // You're looking at it, so the hold has done its job.
+                held_until = None;
                 if !expanded {
                     // Wait for the cursor to settle: crossing the notch on the
                     // way to the menu bar shouldn't pop the panel open, only
@@ -483,6 +518,15 @@ pub fn spawn_hover_watcher(app: AppHandle) {
             if notch_core::hud::pinned() {
                 outside_since = None;
                 continue;
+            }
+
+            // A held-open panel ignores the cursor leaving until the hold ends, so
+            // an interrupt you never moved towards is still readable.
+            if let Some(until) = held_until {
+                if Instant::now() < until {
+                    continue;
+                }
+                held_until = None;
             }
 
             // Outside: shrink once the grace period has fully elapsed, so a

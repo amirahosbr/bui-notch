@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::{json, Value};
 
-use crate::{config, day, git, sessions, todos, usage};
+use crate::{attention, config, day, git, sessions, todos, usage};
 
 /// The live pin, mirroring `config.pinned`.
 ///
@@ -76,21 +76,25 @@ pub fn payload() -> Value {
 /// The payload, with every reading handed in. Pure, so the shape the panel depends
 /// on can be tested without a clock, a network or a config file.
 fn assemble(cfg: &config::NotchConfig, m: &Modules, pinned: bool) -> Value {
+    let attention = attention::current_with_prompt();
     json!({
         "config": cfg,
-        "pill": pill(m),
+        "pill": pill(m, attention.is_some()),
         "day": m.day,
         "usage": m.usage,
         "git": m.git,
         "sessions": m.sessions,
         "todos": m.todos,
+        // Not a module, so it has no switch: the whole value of an interrupt is
+        // that it arrives without being asked for.
+        "attention": attention,
         "pinned": pinned,
     })
 }
 
 /// The few values the collapsed sliver shows, pre-reduced so the strip never has
 /// to dig through the full payload. Any of them may be absent.
-fn pill(m: &Modules) -> Value {
+fn pill(m: &Modules, waiting: bool) -> Value {
     let available = |v: &Option<Value>| {
         v.as_ref()
             .filter(|v| v["available"] == json!(true))
@@ -115,6 +119,10 @@ fn pill(m: &Modules) -> Value {
         "agents": m.sessions.as_ref().and_then(|s| s["active"].as_u64()),
         // Only what needs doing today; the rest is a tab away.
         "todos": todos.as_ref().and_then(|t| t["today_count"].as_u64()),
+        // The interrupt opens the panel for twelve seconds; the request stays live
+        // for three minutes. Without this the sliver would look entirely normal for
+        // the rest of that time, so anyone who stepped away misses it completely.
+        "waiting": waiting,
     })
 }
 
@@ -162,7 +170,15 @@ mod tests {
         let v = assemble(&NotchConfig::default(), &Modules::default(), false);
         let obj = v.as_object().unwrap();
         for key in [
-            "config", "pill", "day", "usage", "git", "sessions", "todos", "pinned",
+            "config",
+            "pill",
+            "day",
+            "usage",
+            "git",
+            "sessions",
+            "todos",
+            "attention",
+            "pinned",
         ] {
             assert!(obj.contains_key(key), "payload is missing {key}");
         }
@@ -191,7 +207,7 @@ mod tests {
             sessions: Some(json!({ "available": true, "active": 2, "total": 5 })),
             todos: Some(json!({ "available": true, "today_count": 3 })),
         };
-        let p = pill(&m);
+        let p = pill(&m, false);
         assert_eq!(p["day_pct"], json!(61.1));
         assert_eq!(p["session_pct"], json!(42.0));
         assert_eq!(p["resets_in"], json!("3h52m"));
@@ -202,7 +218,7 @@ mod tests {
 
     #[test]
     fn the_pill_tolerates_every_module_being_absent() {
-        let p = pill(&Modules::default());
+        let p = pill(&Modules::default(), false);
         assert_eq!(p["resets_in"], json!(""), "an empty string, not null");
         for key in ["day_pct", "session_pct", "commits", "agents", "todos"] {
             assert!(p[key].is_null(), "{key} should be null");
@@ -219,7 +235,7 @@ mod tests {
             todos: Some(json!({ "available": false, "missing": true })),
             ..Default::default()
         };
-        let p = pill(&m);
+        let p = pill(&m, false);
         assert!(p["session_pct"].is_null());
         assert_eq!(p["resets_in"], json!(""));
         assert!(p["commits"].is_null());
@@ -235,7 +251,7 @@ mod tests {
             day: Some(a_day()),
             ..Default::default()
         };
-        let p = pill(&m);
+        let p = pill(&m, false);
         assert!(p["clock"].is_null(), "the strip has no clock");
         assert!(p["meridiem"].is_null());
         assert!(p["battery_pct"].is_null(), "the strip has no battery");
@@ -249,7 +265,43 @@ mod tests {
             sessions: Some(json!({ "available": true, "active": 0, "total": 4 })),
             ..Default::default()
         };
-        assert_eq!(pill(&m)["agents"], json!(0));
+        assert_eq!(pill(&m, false)["agents"], json!(0));
+    }
+
+    #[test]
+    fn the_sliver_keeps_saying_an_agent_is_waiting() {
+        // The panel only opens for twelve seconds, but the request lives for three
+        // minutes — the strip has to carry it for the rest, or stepping away for a
+        // quarter of a minute means never knowing.
+        assert_eq!(pill(&Modules::default(), true)["waiting"], json!(true));
+        assert_eq!(pill(&Modules::default(), false)["waiting"], json!(false));
+    }
+
+    #[test]
+    fn the_waiting_mark_does_not_need_the_sessions_module() {
+        // An agent can be waiting in a project whose session list is switched off.
+        let p = pill(&Modules::default(), true);
+        assert_eq!(p["waiting"], json!(true));
+        assert!(p["agents"].is_null());
+    }
+
+    #[test]
+    fn attention_is_not_gated_by_any_module_switch() {
+        // Every module off, and the interrupt key is still there — it is the one
+        // thing a user cannot switch away.
+        let all_off = NotchConfig {
+            day: false,
+            usage: false,
+            git: false,
+            sessions: false,
+            todos: false,
+            ..NotchConfig::default()
+        };
+        let v = assemble(&all_off, &Modules::default(), false);
+        assert!(
+            v.as_object().unwrap().contains_key("attention"),
+            "an interrupt has no off switch"
+        );
     }
 
     #[test]

@@ -1956,6 +1956,7 @@ name = "notch"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "notch-core",
  "serde_json",

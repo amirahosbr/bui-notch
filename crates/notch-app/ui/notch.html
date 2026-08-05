@@ -271,6 +271,108 @@
         pointer-events: auto;
       }
 
+      /* --- attention: an agent is waiting on you ------------------------- */
+
+      .alert {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        flex-shrink: 0;
+        padding: 0.38rem 0.62rem;
+        border-radius: var(--radius-sm);
+        background: rgba(251, 191, 36, 0.14);
+        border: 0.5px solid rgba(251, 191, 36, 0.35);
+        font-size: var(--text-md);
+      }
+
+      .alert[hidden] {
+        display: none;
+      }
+
+      .alert__head {
+        display: flex;
+        align-items: center;
+        gap: 0.44rem;
+        min-width: 0;
+      }
+
+      .alert__msg {
+        font-weight: 500;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .alert__where {
+        margin-inline-start: auto;
+        color: var(--ink-muted);
+        font-size: var(--text-xs);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      /* What it's asking: the question, or the command awaiting approval. */
+      .alert__ask {
+        display: flex;
+        align-items: baseline;
+        gap: 0.44rem;
+        min-width: 0;
+        padding-inline-start: 0.94rem;
+        font-size: var(--text-sm);
+      }
+
+      .alert__ask[hidden] {
+        display: none;
+      }
+
+      .alert__kind {
+        font-size: var(--text-2xs);
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        color: var(--warn);
+        flex-shrink: 0;
+      }
+
+      .alert__detail {
+        color: var(--ink-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      /* The agent's own option labels, so you know what it is choosing between
+         rather than what a digit might mean. Read-only: answering the agent needs
+         its terminal pane, which this app does not reach into. */
+      .alert__options {
+        display: flex;
+        gap: 0.25rem;
+        flex-wrap: wrap;
+        padding-inline-start: 0.94rem;
+      }
+
+      .alert__options[hidden] {
+        display: none;
+      }
+
+      .alert__option {
+        font-size: var(--text-2xs);
+        font-weight: 600;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: rgba(251, 191, 36, 0.18);
+        border: 0.5px solid rgba(251, 191, 36, 0.4);
+        color: #fde68a;
+        white-space: nowrap;
+      }
+
+      /* Mark the row of the session that's waiting. */
+      .sess--waiting .sess__title {
+        color: var(--warn);
+      }
+
       /* --- tabs: rest on a pill to page through detail, no window needed --- */
 
       .tabs {
@@ -976,6 +1078,20 @@
 
       <!-- Everything below only exists once the window has grown. -->
       <div class="body">
+        <!-- An agent is waiting on you — the one thing allowed to shout, and the
+             only reason this panel ever opens by itself. -->
+        <div class="alert" id="attention" hidden role="status" aria-live="polite">
+          <span class="alert__head">
+            <span class="dot dot--tool"></span>
+            <span class="alert__msg" id="att-msg"></span>
+            <span class="alert__where" id="att-where"></span>
+          </span>
+          <span class="alert__ask" id="att-ask" hidden>
+            <span class="alert__kind" id="att-kind"></span>
+            <span class="alert__detail" id="att-detail"></span>
+          </span>
+          <span class="alert__options" id="att-options" hidden></span>
+        </div>
         <!-- Dynamic-island style: rest on a pill to page through detail without
              leaving the notch or opening a window. -->
         <div class="tabs" id="tabs" role="tablist" aria-label="Views">
